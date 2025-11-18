@@ -2,10 +2,86 @@
 #![no_main]
 
 extern crate alloc;
-use libtinyos::{println, syscalls};
+use core::time::Duration;
+
+use alloc::{boxed::Box, vec, vec::Vec};
+use libtinyos::{
+    println, serial_println,
+    syscalls::{self, TaskStateChange, TaskWaitOptions, WaitOptions},
+};
+use ratatui::{
+    backend::Backend,
+    buffer::Cell,
+    layout::{self, Position, Rect},
+    style::{Color, Style},
+    text::Line,
+    widgets::{Block, Borders},
+};
+
+use crate::graphics::backend::{init_backend, init_drawer, init_term};
+use tinygraphics::draw_target::DrawTarget;
+
+mod background;
+mod graphics;
+mod input;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> ! {
-    println!("Hello, world!");
+    let path = "/proc/kernel/io/serial";
+    let serial = unsafe {
+        syscalls::open(
+            path.as_ptr(),
+            path.bytes().len(),
+            syscalls::OpenOptions::WRITE,
+        )
+    }
+    .unwrap();
+    unsafe { syscalls::dup(serial, Some(syscalls::STDOUT_FILENO)) }.unwrap();
+
+    serial_println!("Building drawer");
+    let drawer = init_drawer();
+    let drawer_ref = Box::leak(drawer.into());
+    serial_println!("drawer box sitting at {:#x}", drawer_ref as *mut _ as usize);
+
+    serial_println!("building backend");
+    let backend = init_backend(drawer_ref);
+
+    serial_println!("building term");
+    let mut term = init_term(backend).unwrap();
+    serial_println!("done");
+    serial_println!("size is: {}", term.size().unwrap());
+
+    serial_println!("trying to draw something");
+    term.draw(|frame| {
+        serial_println!("frame size is : {}", frame.area());
+        frame.render_widget(
+            Block::new()
+                .title(Line::from("hello world"))
+                .borders(Borders::ALL)
+                .style(Style::new().fg(Color::Magenta).bg(Color::Green)),
+            Rect::new(190, 70, 20, 10),
+        );
+    })
+    .unwrap();
+
+    let path = b"/ram/bin/example-rs-timeout";
+
+    let time = unsafe { syscalls::time() }.unwrap();
+    let time = Duration::from_millis(time);
+    serial_println!("time before execve: {:?}", time);
+    let id = unsafe { syscalls::execve(path.as_ptr(), path.len()) }.unwrap();
+    let time2 = unsafe { syscalls::time() }.unwrap();
+    let time2 = Duration::from_millis(time2);
+    serial_println!("term is still alive at {:?} and spawned {}", time2, id);
+    let r = unsafe { syscalls::wait_pid(id, -1, WaitOptions::empty(), TaskWaitOptions::W_EXIT) }
+        .unwrap();
+    assert_eq!(TaskStateChange::EXIT, r);
+    let time3 = unsafe { syscalls::time() }.unwrap();
+    let time3 = Duration::from_millis(time3);
+    serial_println!(
+        "we waited for example-rs to exit until {:?} for {:?}",
+        time3,
+        time3 - time2
+    );
     unsafe { syscalls::exit(0) }
 }
