@@ -2,12 +2,17 @@
 #![no_main]
 
 extern crate alloc;
-use core::time::Duration;
+use core::{marker::PhantomData, time::Duration};
 
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::String,
+    vec::{self, Vec},
+};
 use libtinyos::{
     println, serial_println,
     syscalls::{self, TaskStateChange, TaskWaitOptions, WaitOptions},
+    thread,
 };
 use ratatui::{
     backend::Backend,
@@ -64,7 +69,7 @@ pub extern "C" fn main() -> ! {
     })
     .unwrap();
 
-    let path = b"/ram/bin/example-rs-timeout";
+    let path = b"/ram/bin/example-rs.out";
 
     let time = unsafe { syscalls::time() }.unwrap();
     let time = Duration::from_millis(time);
@@ -83,5 +88,30 @@ pub extern "C" fn main() -> ! {
         time3,
         time3 - time2
     );
+
+    let x = Foo {
+        _x: 42,
+        _p: PhantomData,
+    };
+    let tid = unsafe { syscalls::get_tid() };
+    serial_println!("now spawning thread..., current id is {}", tid);
+    let time4 = Duration::from_millis(unsafe { syscalls::time() }.unwrap());
+
+    let handle = thread::spawn(move || {
+        let tid = unsafe { syscalls::get_tid() };
+        serial_println!("hello form thread with id {}. The arg is {:?}", tid, x);
+    })
+    .unwrap();
+
+    handle.join().unwrap();
+    let time5 = Duration::from_millis(unsafe { syscalls::time() }.unwrap());
+    serial_println!("thread joined, waited for {:?}", time5 - time4);
+
     unsafe { syscalls::exit(0) }
+}
+
+#[derive(Debug)]
+struct Foo {
+    _x: u64,
+    _p: PhantomData<String>,
 }

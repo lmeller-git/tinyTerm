@@ -3,6 +3,6 @@
 echo "building tinyTerm in $(pwd)"
 
 cargo build --release
-ln -sf a.out ./target/target/release/tinyTerm
+ln -sf ./target/target/release/tinyTerm a.out
 
 echo "tinyTerm built"
