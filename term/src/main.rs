@@ -99,10 +99,15 @@ pub extern "C" fn main() -> ! {
 
     let handle = thread::spawn(move || {
         let tid = unsafe { syscalls::get_tid() };
-        serial_println!("hello form thread with id {}. The arg is {:?}", tid, x);
+        loop {
+            serial_println!("hello form thread with id {}. The arg is {:?}", tid, x);
+            unsafe {
+                syscalls::waittime(5000);
+            }
+        }
     })
     .unwrap();
-
+    unsafe { syscalls::thread_cancel(*handle.get_id()) };
     handle.join().unwrap();
     let time5 = Duration::from_millis(unsafe { syscalls::time() }.unwrap());
     serial_println!("thread joined, waited for {:?}", time5 - time4);

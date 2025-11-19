@@ -1,0 +1,8 @@
+
+
+
+
+user input -> kernel input handler -> stdin -> (terminal emulator?) -> shell <spawning, ...> -> stdout -> terminal emulator -> graphics backend -> fb
+
+--> The terminal emulator is spawned at startup, it will then connect to correct stdin and stdout + set up graphics backends. finally, it spawns the default shell as a new process and hooks its stdin and stdout to itself.
+the shell may then spawn new processes, ... based on input given to it from terminal and return ansi to its stdou, which gets interpreted by the terminal. it may also request access to the raw buffer, such that we can do more complex operations on the terminals graphcis backend.

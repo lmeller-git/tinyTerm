@@ -185,6 +185,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e763eef8846b13b380f37dfecda401770b0ca4e56e95170237bd7c25c7db3582"
 
 [[package]]
+name = "const_fn"
+version = "0.4.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f8a2ca5ac02d09563609681103aada9e1777d54fc57a5acd7a41404f9c93b6e"
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -425,6 +431,7 @@ checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 [[package]]
 name = "libtinyos"
 version = "0.1.0"
+source = "git+https://github.com/lmeller-git/libtinyos#b5df03d60e00f5c4cfa74c18dad78c82d8a196c7"
 dependencies = [
  "bitflags",
  "cbindgen",
@@ -810,6 +817,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40868e7c1d2f0b8d73e4a8c7f0ff63af4f6d19be117e90bd73eb1d62cf831c6b"
 
 [[package]]
+name = "tinyShell"
+version = "0.1.0"
+dependencies = [
+ "libtinyos",
+ "tinygraphics",
+]
+
+[[package]]
 name = "tinyTerm"
 version = "0.1.0"
 dependencies = [
@@ -824,6 +839,7 @@ dependencies = [
 [[package]]
 name = "tinygraphics"
 version = "0.1.0"
+source = "git+https://github.com/lmeller-git/libtinyos#b5df03d60e00f5c4cfa74c18dad78c82d8a196c7"
 dependencies = [
  "cbindgen",
  "conquer-once",
@@ -836,7 +852,7 @@ dependencies = [
 [[package]]
 name = "tinyos_abi"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/tinyOS#434412ed9d40899fb6849342c9f4a8ddc6a30fa8"
+source = "git+https://github.com/lmeller-git/tinyOS#e6589b61cecd18f110d4be96cae0fce88cdb6726"
 dependencies = [
  "bitflags",
  "x86_64",
@@ -960,12 +976,13 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "x86_64"
-version = "0.15.2"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f042214de98141e9c8706e8192b73f56494087cc55ebec28ce10f26c5c364ae"
+checksum = "575f620d283cb63500b96c4bcaa12523c6a278d89b85ea35c97ad43ba754fd1e"
 dependencies = [
  "bit_field",
  "bitflags",
+ "const_fn",
  "rustversion",
  "volatile",
 ]
