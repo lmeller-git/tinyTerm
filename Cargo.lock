@@ -431,7 +431,7 @@ checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 [[package]]
 name = "libtinyos"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#b5df03d60e00f5c4cfa74c18dad78c82d8a196c7"
+source = "git+https://github.com/lmeller-git/libtinyos#dd83ea904b38c449933be4b259633b1e609a86bb"
 dependencies = [
  "bitflags",
  "cbindgen",
@@ -839,7 +839,7 @@ dependencies = [
 [[package]]
 name = "tinygraphics"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#b5df03d60e00f5c4cfa74c18dad78c82d8a196c7"
+source = "git+https://github.com/lmeller-git/libtinyos#dd83ea904b38c449933be4b259633b1e609a86bb"
 dependencies = [
  "cbindgen",
  "conquer-once",
@@ -852,7 +852,7 @@ dependencies = [
 [[package]]
 name = "tinyos_abi"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/tinyOS#e6589b61cecd18f110d4be96cae0fce88cdb6726"
+source = "git+https://github.com/lmeller-git/tinyOS#f92e6add4d6285a41ccf26619eff7f927ccce503"
 dependencies = [
  "bitflags",
  "x86_64",

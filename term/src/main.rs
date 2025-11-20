@@ -2,29 +2,16 @@
 #![no_main]
 
 extern crate alloc;
-use core::{marker::PhantomData, time::Duration};
 
-use alloc::{
-    boxed::Box,
-    string::String,
-    vec::{self, Vec},
-};
+use alloc::boxed::Box;
 use libtinyos::{
-    println, serial_println,
-    syscalls::{self, TaskStateChange, TaskWaitOptions, WaitOptions},
+    eprintln, println,
+    syscalls::{self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
     thread,
 };
-use ratatui::{
-    backend::Backend,
-    buffer::Cell,
-    layout::{self, Position, Rect},
-    style::{Color, Style},
-    text::Line,
-    widgets::{Block, Borders},
-};
+use ratatui::{Terminal, layout::Rect, prelude::Backend, style::Style, text::Text};
 
 use crate::graphics::backend::{init_backend, init_drawer, init_term};
-use tinygraphics::draw_target::DrawTarget;
 
 mod background;
 mod graphics;
@@ -43,80 +30,88 @@ pub extern "C" fn main() -> ! {
     .unwrap();
     unsafe { syscalls::dup(serial, Some(syscalls::STDOUT_FILENO)) }.unwrap();
 
-    serial_println!("Building drawer");
     let drawer = init_drawer();
     let drawer_ref = Box::leak(drawer.into());
-    serial_println!("drawer box sitting at {:#x}", drawer_ref as *mut _ as usize);
-
-    serial_println!("building backend");
     let backend = init_backend(drawer_ref);
+    let term = init_term(backend).unwrap();
 
-    serial_println!("building term");
-    let mut term = init_term(backend).unwrap();
-    serial_println!("done");
-    serial_println!("size is: {}", term.size().unwrap());
+    println!("terminal hooked into serial, attached fb");
 
-    serial_println!("trying to draw something");
-    term.draw(|frame| {
-        serial_println!("frame size is : {}", frame.area());
-        frame.render_widget(
-            Block::new()
-                .title(Line::from("hello world"))
-                .borders(Borders::ALL)
-                .style(Style::new().fg(Color::Magenta).bg(Color::Green)),
-            Rect::new(190, 70, 20, 10),
-        );
-    })
-    .unwrap();
+    let shell = b"/ram/bin/shell";
 
-    let path = b"/ram/bin/example-rs.out";
+    let mut input_ids = [0_u32, 0_u32];
+    unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2]) }.unwrap();
+    let mut output_ids = [0_u32, 0_u32];
+    unsafe { syscalls::pipe(&mut output_ids as *mut [u32; 2]) }.unwrap();
+    let mut err_ids = [0_u32, 0_u32];
+    unsafe { syscalls::pipe(&mut err_ids as *mut [u32; 2]) }.unwrap();
 
-    let time = unsafe { syscalls::time() }.unwrap();
-    let time = Duration::from_millis(time);
-    serial_println!("time before execve: {:?}", time);
-    let id = unsafe { syscalls::execve(path.as_ptr(), path.len()) }.unwrap();
-    let time2 = unsafe { syscalls::time() }.unwrap();
-    let time2 = Duration::from_millis(time2);
-    serial_println!("term is still alive at {:?} and spawned {}", time2, id);
-    let r = unsafe { syscalls::wait_pid(id, -1, WaitOptions::empty(), TaskWaitOptions::W_EXIT) }
-        .unwrap();
-    assert_eq!(TaskStateChange::EXIT, r);
-    let time3 = unsafe { syscalls::time() }.unwrap();
-    let time3 = Duration::from_millis(time3);
-    serial_println!(
-        "we waited for example-rs to exit until {:?} for {:?}",
-        time3,
-        time3 - time2
-    );
+    unsafe { syscalls::dup(input_ids[0], Some(STDIN_FILENO)) }.unwrap();
+    unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
+    unsafe { syscalls::dup(err_ids[1], Some(STDERR_FILENO)) }.unwrap();
 
-    let x = Foo {
-        _x: 42,
-        _p: PhantomData,
-    };
-    let tid = unsafe { syscalls::get_tid() };
-    serial_println!("now spawning thread..., current id is {}", tid);
-    let time4 = Duration::from_millis(unsafe { syscalls::time() }.unwrap());
+    let shell_id = unsafe { syscalls::execve(shell.as_ptr(), shell.len()) }.unwrap();
 
-    let handle = thread::spawn(move || {
-        let tid = unsafe { syscalls::get_tid() };
-        loop {
-            serial_println!("hello form thread with id {}. The arg is {:?}", tid, x);
-            unsafe {
-                syscalls::waittime(5000);
-            }
-        }
-    })
-    .unwrap();
-    unsafe { syscalls::thread_cancel(*handle.get_id()) };
-    handle.join().unwrap();
-    let time5 = Duration::from_millis(unsafe { syscalls::time() }.unwrap());
-    serial_println!("thread joined, waited for {:?}", time5 - time4);
+    unsafe { syscalls::dup(serial, Some(STDOUT_FILENO)) }.unwrap();
+    unsafe { syscalls::dup(serial, Some(STDERR_FILENO)) }.unwrap();
 
+    let path = b"/proc/kernel/io/keyboard";
+    let stdin = unsafe { syscalls::open(path.as_ptr(), path.len(), OpenOptions::READ) }.unwrap();
+    unsafe { syscalls::dup(stdin, Some(STDIN_FILENO)) }.unwrap();
+
+    println!("spawned shell, hooked to terminal and attached back to serial");
+
+    thread::spawn(move || input_loop(input_ids[1])).unwrap();
+    thread::spawn(move || stderr_handler(err_ids[0], shell_id)).unwrap();
+    println!("background threads started up, we will now handle the shells in and output");
+
+    stdout_handler(output_ids[0], term);
+
+    eprintln!("Stdout handler exited. Shutting down terminal...");
     unsafe { syscalls::exit(0) }
 }
 
-#[derive(Debug)]
-struct Foo {
-    _x: u64,
-    _p: PhantomData<String>,
+fn input_loop(write_fd: FileDescriptor) {
+    let mut buf = [0; 64];
+    loop {
+        let read =
+            unsafe { syscalls::read(STDIN_FILENO, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
+                .unwrap();
+        if unsafe { syscalls::write(write_fd, buf.as_ptr(), read as usize) }.is_err() {
+            eprintln!("error writing to shel input pipe.");
+        }
+    }
+}
+
+fn stderr_handler(input_fd: FileDescriptor, pid: u64) {
+    let mut buf = [0; 64];
+    loop {
+        let read =
+            unsafe { syscalls::read(input_fd, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
+                .unwrap();
+        let Ok(output) = core::str::from_utf8(&buf[..read as usize]) else {
+            eprintln!("unknwon error in shell {} encountered", pid);
+            panic!("unknown error in shell with id {}", pid)
+        };
+        eprintln!("error in shell: {}", output);
+    }
+}
+
+fn stdout_handler<B: Backend>(input_fd: FileDescriptor, mut terminal: Terminal<B>) {
+    let mut buf = [0; 64];
+    loop {
+        let read =
+            unsafe { syscalls::read(input_fd, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
+                .unwrap();
+        if let Ok(r) = str::from_utf8(&buf[..read as usize]) {
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(
+                        Text::raw(r).style(Style::new().fg(ratatui::style::Color::Red)),
+                        Rect::new(10, 10, 50, 50),
+                    )
+                })
+                .unwrap();
+        }
+    }
 }
