@@ -9,8 +9,8 @@ default = []
 [dependencies]
 libtinyos = { git = "https://github.com/lmeller-git/libtinyos" }
 tinygraphics = { git = "https://github.com/lmeller-git/libtinyos" }
-# libtinyos = { path = "../libtinyos/libtinyos" }
-# tinygraphics = { path = "../libtinyos/tinygraphics" }
+# libtinyos = { path = "../../libtinyos/libtinyos" }
+# tinygraphics = { path = "../../libtinyos/tinygraphics" }
 
 ### ratatui + mousefood dependency versions copied from https://github.com/overdrivenpotato/rust-psp/blob/master/examples/ratatui/Cargo.toml, update if applicable
 mousefood = { git = "https://github.com/j-g00da/mousefood", default-features = false, features = ["fonts", "framebuffer"] } #, rev = "1028ac24f83920fd95a5585a85ef943901ee63ac" }

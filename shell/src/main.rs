@@ -2,7 +2,10 @@
 #![no_main]
 
 extern crate alloc;
-use core::fmt::{Display, Write};
+use core::{
+    fmt::{Display, Write},
+    ptr::null,
+};
 use libtinyos::{
     print, println, serial_println,
     syscalls::{OpenOptions, TaskWaitOptions, WaitOptions},
@@ -47,7 +50,11 @@ extern "C" fn main() {
             }
             lines.extend(r);
             if let Some(last_ret) = lines.iter().position(|item| *item == KeyCode::Char('\n')) {
-                let split = &lines[..last_ret];
+                let bin_end = lines
+                    .iter()
+                    .position(|item| *item == KeyCode::Char(' '))
+                    .unwrap_or(last_ret);
+                let split = &lines[..bin_end];
                 serial_println!("split is {:?}", split);
                 let name = split
                     .iter()
@@ -59,13 +66,32 @@ extern "C" fn main() {
                         }
                     })
                     .collect::<String>();
-                serial_println!("shell received {}", name);
+                let args = &lines[bin_end..last_ret]
+                    .iter()
+                    .filter_map(|item| {
+                        if let KeyCode::Char(c) = *item {
+                            Some(c)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<String>();
+                serial_println!("shell received {}, with args {}", name, args);
                 if bins.contains(&name.as_ref()) {
                     let name_bytes = name.bytes();
                     let mut path = Vec::with_capacity(bin_dir_path.len() + name.len());
                     path.extend_from_slice(bin_dir_path);
                     path.extend(name_bytes);
-                    if let Ok(exe_pid) = unsafe { syscalls::execve(path.as_ptr(), path.len()) } {
+                    if let Ok(exe_pid) = unsafe {
+                        syscalls::execve(
+                            path.as_ptr(),
+                            path.len(),
+                            args.as_ptr(),
+                            args.bytes().count(),
+                            null(),
+                            0,
+                        )
+                    } {
                         serial_println!(
                             "spawned process with path {}",
                             str::from_utf8(&path).unwrap()
