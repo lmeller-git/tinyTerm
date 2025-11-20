@@ -9,7 +9,13 @@ use libtinyos::{
     syscalls::{self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
     thread,
 };
-use ratatui::{Terminal, layout::Rect, prelude::Backend, style::Style, text::Text};
+use ratatui::{
+    Terminal,
+    prelude::Backend,
+    style::{Color, Style, Stylize},
+    text::Line,
+    widgets::{Block, BorderType, Padding, Paragraph, Wrap},
+};
 
 use crate::graphics::backend::{init_backend, init_drawer, init_term};
 
@@ -98,20 +104,39 @@ fn stderr_handler(input_fd: FileDescriptor, pid: u64) {
 }
 
 fn stdout_handler<B: Backend>(input_fd: FileDescriptor, mut terminal: Terminal<B>) {
-    let mut buf = [0; 64];
+    const BUF_SIZE: usize = 1024;
+    let mut buf = [0; BUF_SIZE];
+    let mut cursor = 0;
     loop {
-        let read =
-            unsafe { syscalls::read(input_fd, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
-                .unwrap();
-        if let Ok(r) = str::from_utf8(&buf[..read as usize]) {
+        let read = unsafe {
+            syscalls::read(
+                input_fd,
+                buf[cursor..].as_mut_ptr(),
+                buf.len() - cursor,
+                -1_i64 as usize,
+            )
+        }
+        .unwrap();
+        if let Ok(r) = str::from_utf8(&buf[..read as usize + cursor]) {
             terminal
                 .draw(|frame| {
-                    frame.render_widget(
-                        Text::raw(r).style(Style::new().fg(ratatui::style::Color::Red)),
-                        Rect::new(10, 10, 50, 50),
-                    )
+                    let block = Block::bordered()
+                        .border_style(Style::new().fg(Color::Red).bg(Color::Blue))
+                        .title_top(Line::from("Terminal").centered().bold().fg(Color::Yellow))
+                        .border_type(BorderType::Rounded)
+                        .padding(Padding::new(5, 5, 5, 5));
+                    let paragraph = Paragraph::new(r)
+                        .block(block)
+                        .wrap(Wrap { trim: true })
+                        .fg(Color::White);
+                    frame.render_widget(paragraph, frame.area())
                 })
                 .unwrap();
+        }
+        cursor += read as usize;
+        if cursor >= BUF_SIZE {
+            cursor = 0;
+            buf.fill(0);
         }
     }
 }

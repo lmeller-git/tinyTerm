@@ -3,23 +3,110 @@
 
 extern crate alloc;
 use core::fmt::{Display, Write};
-use libtinyos::println;
+use libtinyos::{
+    print, println, serial_println,
+    syscalls::{OpenOptions, TaskWaitOptions, WaitOptions},
+};
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use libtinyos::{eprintln, syscalls};
 
 #[unsafe(no_mangle)]
 extern "C" fn main() {
     println!("Hello, world!");
     let mut buf = [0; 10];
+    let mut lines = Vec::new();
+
+    let bin_dir_path = b"/ram/bin/";
+    let bin_dir =
+        unsafe { syscalls::open(bin_dir_path.as_ptr(), bin_dir_path.len(), OpenOptions::READ) }
+            .unwrap();
+    let mut ls_buf = [0; 128];
+    let n =
+        unsafe { syscalls::read(bin_dir, ls_buf.as_mut_ptr(), ls_buf.len(), 0) }.unwrap() as usize;
+    let mut bins = str::from_utf8(&ls_buf[..n])
+        .unwrap()
+        .split("\t")
+        .collect::<Vec<&str>>();
+    bins.pop();
+    serial_println!("ls bins = {:?}", bins);
+
     loop {
-        let r = query_keyboard_once(&mut buf);
-        println!("received: {:?}", r);
+        println!("/");
+        print!("> ");
+        loop {
+            let r = query_keyboard_once(&mut buf);
+            for c in r.iter().filter(|item| {
+                if let KeyCode::Char(_) = item {
+                    true
+                } else {
+                    false
+                }
+            }) {
+                print!("{}", c);
+            }
+            lines.extend(r);
+            if let Some(last_ret) = lines.iter().position(|item| *item == KeyCode::Char('\n')) {
+                let split = &lines[..last_ret];
+                serial_println!("split is {:?}", split);
+                let name = split
+                    .iter()
+                    .filter_map(|item| {
+                        if let KeyCode::Char(c) = item {
+                            Some(c)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<String>();
+                serial_println!("shell received {}", name);
+                if bins.contains(&name.as_ref()) {
+                    let name_bytes = name.bytes();
+                    let mut path = Vec::with_capacity(bin_dir_path.len() + name.len());
+                    path.extend_from_slice(bin_dir_path);
+                    path.extend(name_bytes);
+                    if let Ok(exe_pid) = unsafe { syscalls::execve(path.as_ptr(), path.len()) } {
+                        serial_println!(
+                            "spawned process with path {}",
+                            str::from_utf8(&path).unwrap()
+                        );
+                        _ = unsafe {
+                            syscalls::wait_pid(
+                                exe_pid,
+                                -1,
+                                WaitOptions::empty(),
+                                TaskWaitOptions::W_EXIT,
+                            )
+                        }
+                        .inspect_err(|e| {
+                            eprintln!("failed to wait for process {}: {:?}", exe_pid, e);
+                        });
+                    } else {
+                        eprintln!(
+                            "could not spawn binary with path {}",
+                            str::from_utf8(&path).unwrap()
+                        );
+                    };
+                } else {
+                    eprintln!("No binary with name {} exists.", name);
+                }
+
+                _ = lines.drain(..last_ret + 1);
+                break;
+            }
+        }
     }
 }
 
 pub fn query_keyboard_once(buf: &mut [u8]) -> Vec<KeyCode> {
-    let res = unsafe { syscalls::read(syscalls::STDIN_FILENO, buf.as_mut_ptr(), buf.len(), 50) };
+    let res = unsafe {
+        syscalls::read(
+            syscalls::STDIN_FILENO,
+            buf.as_mut_ptr(),
+            buf.len(),
+            -1_i64 as usize,
+        )
+    };
     if let Ok(res) = res {
         parse_ansi(&buf[..res as usize])
     } else {
