@@ -43,7 +43,7 @@ pub extern "C" fn main() -> ! {
 
     println!("terminal hooked into serial, attached fb");
 
-    let shell = b"/ram/bin/shell";
+    let shell = b"/ram/bin/tinyShell.out";
 
     let mut input_ids = [0_u32, 0_u32];
     unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2]) }.unwrap();
