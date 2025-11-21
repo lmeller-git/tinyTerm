@@ -24,7 +24,7 @@ extern "C" fn main() {
     let bin_dir =
         unsafe { syscalls::open(bin_dir_path.as_ptr(), bin_dir_path.len(), OpenOptions::READ) }
             .unwrap();
-    let mut ls_buf = [0; 128];
+    let mut ls_buf = [0; 256];
     let n =
         unsafe { syscalls::read(bin_dir, ls_buf.as_mut_ptr(), ls_buf.len(), 0) }.unwrap() as usize;
     let mut bins = str::from_utf8(&ls_buf[..n])
