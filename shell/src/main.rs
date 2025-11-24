@@ -14,6 +14,10 @@ use libtinyos::{
 use alloc::{string::String, vec::Vec};
 use libtinyos::{eprintln, syscalls};
 
+mod io;
+mod jobs;
+mod parse;
+
 #[unsafe(no_mangle)]
 extern "C" fn main() {
     println!("Hello, world!");
