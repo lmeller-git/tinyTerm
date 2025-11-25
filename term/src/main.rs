@@ -8,7 +8,7 @@ use core::{ptr::null, str::FromStr};
 use alloc::boxed::Box;
 use conquer_once::spin::OnceCell;
 use libtinyos::{
-    eprintln, println,
+    eprint, eprintln, println,
     syscalls::{self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
     thread,
 };
@@ -132,7 +132,7 @@ pub extern "C" fn main() -> ! {
     unsafe { syscalls::dup(serial, Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(serial, Some(STDERR_FILENO)) }.unwrap();
 
-    let path = b"/proc/kernel/io/keyboard";
+    let path = b"/proc/kernel/io/stateful_keyboard";
     let stdin = unsafe { syscalls::open(path.as_ptr(), path.len(), OpenOptions::READ) }.unwrap();
     unsafe { syscalls::dup(stdin, Some(STDIN_FILENO)) }.unwrap();
 
@@ -151,6 +151,7 @@ pub extern "C" fn main() -> ! {
 fn input_loop(write_fd: FileDescriptor) {
     let mut buf = [0; 64];
     loop {
+        unsafe { syscalls::seek(STDIN_FILENO, 0) }.unwrap();
         let read =
             unsafe { syscalls::read(STDIN_FILENO, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
                 .unwrap();
@@ -170,7 +171,7 @@ fn stderr_handler(input_fd: FileDescriptor, pid: u64) {
             eprintln!("unknwon error in shell {} encountered", pid);
             panic!("unknown error in shell with id {}", pid)
         };
-        eprintln!("error in shell: {}", output);
+        eprint!("{}", output);
     }
 }
 

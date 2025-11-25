@@ -152,6 +152,10 @@ fn parse_ansi(buf: &[u8]) -> Vec<KeyCode> {
         #[allow(clippy::single_match)]
         match *current {
             0x1B => codes.push(parse_escaped(buf, &mut cursor)),
+            0x08 => {
+                codes.push(KeyCode::BackSpace);
+                cursor += 1;
+            }
             _ => {
                 codes.push(
                     str::from_utf8(&buf[cursor..=cursor])
@@ -211,6 +215,7 @@ pub enum KeyCode {
     Char(char),
     Esc,
     Unknown,
+    BackSpace,
 }
 
 impl Display for KeyCode {
@@ -223,6 +228,7 @@ impl Display for KeyCode {
             Self::Char(c) => f.write_char(*c),
             Self::Esc => f.write_str("Esc"),
             Self::Unknown => f.write_str("Unknown"),
+            Self::BackSpace => f.write_str("backspace"),
         }
     }
 }
