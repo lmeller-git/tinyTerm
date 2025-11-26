@@ -9,6 +9,7 @@ default = []
 [dependencies]
 libtinyos = { git = "https://github.com/lmeller-git/libtinyos" }
 tinygraphics = { git = "https://github.com/lmeller-git/libtinyos" }
+vte = { version = "0.15.0", default-features = false, features = ["ansi"] }
 # libtinyos = { path = "../../libtinyos/libtinyos" }
 # tinygraphics = { path = "../../libtinyos/tinygraphics" }
 

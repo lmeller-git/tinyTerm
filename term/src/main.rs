@@ -5,7 +5,7 @@ extern crate alloc;
 
 use core::{ptr::null, str::FromStr};
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use conquer_once::spin::OnceCell;
 use libtinyos::{
     eprint, eprintln, println,
@@ -29,6 +29,13 @@ mod input;
 static CONFIG: OnceCell<Config> = OnceCell::uninit();
 
 const DEFAULT_CONF: &[u8] = b"border: white\ttext: white\tbg: black\ttitle: green";
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    Abort = 0,
+    Background = 1,
+}
 
 struct Config {
     config_file: FileDescriptor,
@@ -113,7 +120,7 @@ pub extern "C" fn main() -> ! {
 
     println!("terminal hooked into serial, attached fb");
 
-    let shell = b"/ram/bin/tinyShell.out";
+    let shell = b"/ram/bin/TinyShell.out";
 
     let mut input_ids = [0_u32, 0_u32];
     unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2]) }.unwrap();
@@ -121,6 +128,8 @@ pub extern "C" fn main() -> ! {
     unsafe { syscalls::pipe(&mut output_ids as *mut [u32; 2]) }.unwrap();
     let mut err_ids = [0_u32, 0_u32];
     unsafe { syscalls::pipe(&mut err_ids as *mut [u32; 2]) }.unwrap();
+    let mut signal_ids = [0_u32, 0_u32];
+    unsafe { syscalls::pipe(&mut signal_ids as *mut [u32; 2]) }.unwrap();
 
     unsafe { syscalls::dup(input_ids[0], Some(STDIN_FILENO)) }.unwrap();
     unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
@@ -138,7 +147,7 @@ pub extern "C" fn main() -> ! {
 
     println!("spawned shell, hooked to terminal and attached back to serial");
 
-    thread::spawn(move || input_loop(input_ids[1])).unwrap();
+    thread::spawn(move || input_loop(input_ids[1], signal_ids)).unwrap();
     thread::spawn(move || stderr_handler(err_ids[0], shell_id)).unwrap();
     println!("background threads started up, we will now handle the shells in and output");
 
@@ -148,14 +157,28 @@ pub extern "C" fn main() -> ! {
     unsafe { syscalls::exit(0) }
 }
 
-fn input_loop(write_fd: FileDescriptor) {
+fn input_loop(write_fd: FileDescriptor, signal_fds: [FileDescriptor; 2]) {
+    // first we send the fd, which is coupled to signal pipe read end
+    unsafe { syscalls::write(write_fd, signal_fds[0].to_be_bytes().as_ptr(), 4) }.unwrap();
     let mut buf = [0; 64];
     loop {
         unsafe { syscalls::seek(STDIN_FILENO, 0) }.unwrap();
         let read =
             unsafe { syscalls::read(STDIN_FILENO, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
-                .unwrap();
-        if unsafe { syscalls::write(write_fd, buf.as_ptr(), read as usize) }.is_err() {
+                .unwrap() as usize;
+        let signals: Vec<u8> = buf[..read]
+            .iter()
+            .filter_map(|byte| match byte {
+                3 => Some(Signal::Abort as u8),
+                26 => Some(Signal::Background as u8),
+                _ => None,
+            })
+            .collect();
+
+        if !signals.is_empty() {
+            unsafe { syscalls::write(signal_fds[1], signals.as_ptr(), signals.len()) }.unwrap();
+        }
+        if unsafe { syscalls::write(write_fd, buf.as_ptr(), read) }.is_err() {
             eprintln!("error writing to shel input pipe.");
         }
     }
