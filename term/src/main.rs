@@ -135,11 +135,12 @@ pub extern "C" fn main() -> ! {
     unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(err_ids[1], Some(STDERR_FILENO)) }.unwrap();
 
-    let shell_id =
-        unsafe { syscalls::execve(shell.as_ptr(), shell.len(), null(), 0, null(), 0) }.unwrap();
+    let shell_id = unsafe { syscalls::execve(shell.as_ptr(), shell.len(), null(), 0, null(), 0) };
 
     unsafe { syscalls::dup(serial, Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(serial, Some(STDERR_FILENO)) }.unwrap();
+
+    let shell_id = shell_id.unwrap();
 
     let path = b"/proc/kernel/io/stateful_keyboard";
     let stdin = unsafe { syscalls::open(path.as_ptr(), path.len(), OpenOptions::READ) }.unwrap();
