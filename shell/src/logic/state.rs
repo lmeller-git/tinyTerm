@@ -23,25 +23,20 @@ impl ShellState {
     }
 
     fn extract_command(&self) -> Command {
-        if let Some(arg_split) = self
+        let should_skip = self
             .input_buf
             .iter()
-            .skip(1) // skip injected prompt
-            .skip_while(|item| item.is_whitespace())
-            .position(|item| item.is_whitespace())
-        {
-            let skipped = self
-                .input_buf
-                .iter()
-                .skip(1)
-                .skip_while(|item| item.is_whitespace())
-                .count();
-            Command::new(
-                &self.input_buf[skipped..arg_split + skipped],
-                &self.input_buf[skipped + arg_split..],
-            )
+            .skip(1) // prompt
+            .position(|item| !item.is_whitespace())
+            .unwrap_or(self.input_buf.len());
+
+        let mut splits = self.input_buf[should_skip..].splitn(2, |item| item.is_whitespace());
+
+        let bin_name = splits.next().unwrap_or([].as_slice());
+        if let Some(args) = splits.next() {
+            Command::new(bin_name, args)
         } else {
-            Command::bin(&self.input_buf)
+            Command::bin(bin_name)
         }
     }
 
