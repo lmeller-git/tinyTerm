@@ -44,13 +44,8 @@ extern "C" fn main() {
 
 fn drain_stdin() {
     let mut buf = [0; 64];
-    while let Ok(n) = unsafe {
-        syscalls::read(
-            syscalls::STDIN_FILENO,
-            buf.as_mut_ptr(),
-            buf.len(),
-            -1_i64 as usize,
-        )
-    } && n > 0
+    while let Ok(n) =
+        unsafe { syscalls::read(syscalls::STDIN_FILENO, buf.as_mut_ptr(), buf.len(), 0) }
+        && n > 0
     {}
 }
