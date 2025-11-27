@@ -23,12 +23,16 @@ impl ShellState {
     }
 
     fn extract_command(&self) -> Command {
-        let should_skip = self
+        let prompt_len = 1;
+        let Some(should_skip) = self
             .input_buf
             .iter()
-            .skip(1) // prompt
+            .skip(prompt_len) // prompt
             .position(|item| !item.is_whitespace())
-            .unwrap_or(self.input_buf.len());
+            .map(|pos| pos + prompt_len)
+        else {
+            return Command::bin([].as_slice());
+        };
 
         let mut splits = self.input_buf[should_skip..].splitn(2, |item| item.is_whitespace());
 
