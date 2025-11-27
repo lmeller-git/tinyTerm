@@ -1,9 +1,10 @@
 use core::str::FromStr;
 
 use libtinyos::syscalls::{self, FileDescriptor, OpenOptions};
-use ratatui::style::Color;
+use ratatui::{prelude::Backend, style::Color};
+use vte::ansi::Handler;
 
-use crate::graphics::DEFAULT_CONF;
+use crate::{graphics::DEFAULT_CONF, state::TermState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
@@ -68,4 +69,74 @@ impl Config {
             None
         }
     }
+}
+
+struct VTEPerformerHandler<B: Backend> {
+    terminal: TermState<B>,
+}
+
+impl<B: Backend> VTEPerformerHandler<B> {
+    pub fn new(terminal: TermState<B>) -> Self {
+        Self { terminal }
+    }
+}
+
+impl<B: Backend> Handler for VTEPerformerHandler<B> {
+    fn set_title(&mut self, _: Option<alloc::string::String>) {}
+
+    fn set_cursor_style(&mut self, _: Option<vte::ansi::CursorStyle>) {}
+
+    fn set_cursor_shape(&mut self, _shape: vte::ansi::CursorShape) {}
+
+    fn input(&mut self, _c: char) {}
+
+    fn move_up(&mut self, _: usize) {}
+
+    fn move_down(&mut self, _: usize) {}
+
+    fn move_forward(&mut self, _col: usize) {}
+
+    fn move_backward(&mut self, _col: usize) {}
+
+    fn bell(&mut self) {}
+
+    fn carriage_return(&mut self) {}
+
+    fn linefeed(&mut self) {}
+
+    fn newline(&mut self) {}
+
+    fn scroll_up(&mut self, _: usize) {}
+
+    fn scroll_down(&mut self, _: usize) {}
+
+    fn save_cursor_position(&mut self) {}
+
+    fn reset_state(&mut self) {}
+
+    fn set_scrolling_region(&mut self, _top: usize, _bottom: Option<usize>) {}
+
+    fn clear_screen(&mut self, _mode: vte::ansi::ClearMode) {}
+
+    fn clear_line(&mut self, _mode: vte::ansi::LineClearMode) {}
+
+    fn set_active_charset(&mut self, _: vte::ansi::CharsetIndex) {}
+
+    fn restore_cursor_position(&mut self) {}
+
+    fn configure_charset(&mut self, _: vte::ansi::CharsetIndex, _: vte::ansi::StandardCharset) {}
+
+    fn set_color(&mut self, _: usize, _: vte::ansi::Rgb) {}
+
+    fn dynamic_color_sequence(&mut self, _: alloc::string::String, _: usize, _: &str) {}
+
+    fn reset_color(&mut self, _: usize) {}
+
+    fn clipboard_store(&mut self, _: u8, _: &[u8]) {}
+
+    fn clipboard_load(&mut self, _: u8, _: &str) {}
+
+    fn push_title(&mut self) {}
+
+    fn pop_title(&mut self) {}
 }

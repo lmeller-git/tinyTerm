@@ -847,6 +847,7 @@ dependencies = [
  "ratatui",
  "spin",
  "tinygraphics",
+ "vte",
 ]
 
 [[package]]
@@ -865,7 +866,7 @@ dependencies = [
 [[package]]
 name = "tinyos_abi"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/tinyOS#494c2ce407731ea6c84e9dfb0df03ae8357fe46c"
+source = "git+https://github.com/lmeller-git/tinyOS#ec8b7c7f0b8bb53e44134aa615ebc48ad1b5faa8"
 dependencies = [
  "bitflags",
  "x86_64",
@@ -990,9 +991,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
+checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
 
 [[package]]
 name = "wit-bindgen"

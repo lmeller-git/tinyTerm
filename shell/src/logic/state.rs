@@ -7,6 +7,8 @@ use crate::{
     logic::jobs::{Command, wait},
 };
 
+const PROMPT: &str = "> ";
+
 pub struct ShellState {
     input_buf: Vec<char>,
     cursor: usize,
@@ -23,7 +25,7 @@ impl ShellState {
     }
 
     fn extract_command(&self) -> Command {
-        let prompt_len = 1;
+        let prompt_len = PROMPT.chars().count();
         let Some(should_skip) = self
             .input_buf
             .iter()
@@ -51,8 +53,12 @@ impl ShellState {
 
     fn inject_prompt(&mut self) {
         println!("tinyos:/\n");
-        self.input('>');
-        self.input(' ');
+        for char in PROMPT.chars() {
+            self.input(char)
+        }
+    }
+    fn is_empty(&self) -> bool {
+        self.input_buf.len() > PROMPT.chars().count()
     }
 }
 
@@ -102,5 +108,12 @@ impl Handler for ShellState {
         self.input('\n');
         self.carriage_return();
         self.inject_prompt();
+    }
+
+    fn backspace(&mut self) {
+        if !self.is_empty() && self.cursor > PROMPT.chars().count() {
+            self.input_buf.remove(self.cursor - 1);
+            self.move_backward(1);
+        }
     }
 }
