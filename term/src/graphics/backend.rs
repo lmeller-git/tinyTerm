@@ -1,5 +1,4 @@
 use mousefood::{EmbeddedBackend, EmbeddedBackendConfig, prelude::Rgb888};
-use ratatui::Terminal;
 use tinygraphics::{
     backend::PrimitiveDrawer,
     prelude::{DrawTarget, RgbColor},
@@ -20,11 +19,4 @@ pub fn init_backend<'draw>(
     drawer: &'draw mut DrawBackend<'static, Color>,
 ) -> MousefoodBackend<'draw, DrawBackend<'static, Color>> {
     MousefoodBackend::new(drawer, EmbeddedBackendConfig::default())
-}
-
-pub fn init_term(
-    backend: MousefoodBackend<'static, DrawBackend<'static, Color>>,
-) -> Result<Terminal<MousefoodBackend<'static, DrawBackend<'static, Color>>>, mousefood::error::Error>
-{
-    Terminal::new(backend)
 }

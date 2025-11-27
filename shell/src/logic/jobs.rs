@@ -10,6 +10,8 @@ use libtinyos::{
     syscalls::{self, FileDescriptor, SysCallRes, TaskWaitOptions, WaitOptions},
 };
 
+use crate::logic::trim_string_in_place;
+
 pub static CURRENT_FG: AtomicU64 = AtomicU64::new(0);
 pub static WE_ARE_FG: AtomicBool = AtomicBool::new(false);
 
@@ -21,8 +23,11 @@ pub struct Command {
 
 impl Command {
     pub fn new(bin: &[char], args: &[char]) -> Self {
-        let bin = bin.iter().collect();
-        let args = args.iter().collect();
+        let mut bin = bin.iter().collect();
+        let mut args = args.iter().collect();
+        trim_string_in_place(&mut bin);
+        trim_string_in_place(&mut args);
+
         Self {
             bin_name: bin,
             argc: args,

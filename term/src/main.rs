@@ -3,101 +3,35 @@
 
 extern crate alloc;
 
-use core::{ptr::null, str::FromStr};
-
 use alloc::{boxed::Box, vec::Vec};
 use conquer_once::spin::OnceCell;
 use libtinyos::{
     eprint, eprintln, println,
-    syscalls::{self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
+    syscalls::{self, FileDescriptor, STDIN_FILENO},
     thread,
 };
-use ratatui::{
-    Terminal,
-    prelude::Backend,
-    style::{Color, Style, Stylize},
-    text::Line,
-    widgets::{Block, BorderType, Padding, Paragraph, Wrap},
+use ratatui::prelude::Backend;
+
+use crate::{
+    graphics::backend::{init_backend, init_drawer},
+    init::{PipePair, init},
+    parse::Config,
+    state::TermState,
 };
 
-use crate::graphics::backend::{init_backend, init_drawer, init_term};
-
-mod background;
-mod graphics;
+pub mod graphics;
+mod init;
 mod input;
+pub mod parse;
+pub mod state;
 
 static CONFIG: OnceCell<Config> = OnceCell::uninit();
-
-const DEFAULT_CONF: &[u8] = b"border: white\ttext: white\tbg: black\ttitle: green";
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     Abort = 0,
     Background = 1,
-}
-
-struct Config {
-    config_file: FileDescriptor,
-}
-
-impl Config {
-    fn new() -> Self {
-        let path = b"/ram/term.conf";
-        let config_file = unsafe {
-            syscalls::open(
-                path.as_ptr(),
-                path.len(),
-                OpenOptions::READ | OpenOptions::WRITE | OpenOptions::CREATE,
-            )
-        }
-        .unwrap();
-
-        unsafe { syscalls::write(config_file, DEFAULT_CONF.as_ptr(), DEFAULT_CONF.len()) }.unwrap();
-
-        Self { config_file }
-    }
-
-    fn bg(&self) -> Color {
-        self.parse_item("bg").unwrap_or(Color::Black)
-    }
-
-    fn border(&self) -> Color {
-        self.parse_item("border").unwrap_or(Color::White)
-    }
-
-    fn text(&self) -> Color {
-        self.parse_item("text").unwrap_or(Color::White)
-    }
-
-    fn title(&self) -> Color {
-        self.parse_item("title").unwrap_or(Color::Green)
-    }
-
-    fn parse_item(&self, name: &str) -> Option<Color> {
-        let mut buf = [0; DEFAULT_CONF.len() + 10];
-        if let Ok(n) = unsafe { syscalls::read(self.config_file, buf.as_mut_ptr(), buf.len(), 0) }
-            && n > 0
-            && let Ok(values) = str::from_utf8(&buf[..n as usize])
-        {
-            values
-                .split('\t')
-                .filter_map(|config_line| {
-                    if config_line.starts_with(name) {
-                        config_line
-                            .split(' ')
-                            .last()
-                            .map(|color_str| Color::from_str(color_str).ok())
-                            .flatten()
-                    } else {
-                        None
-                    }
-                })
-                .next()
-        } else {
-            None
-        }
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -116,51 +50,29 @@ pub extern "C" fn main() -> ! {
     let drawer = init_drawer();
     let drawer_ref = Box::leak(drawer.into());
     let backend = init_backend(drawer_ref);
-    let term = init_term(backend).unwrap();
+    let term = TermState::new(backend);
 
     println!("terminal hooked into serial, attached fb");
 
-    let shell = b"/ram/bin/shell";
+    let shell = "/ram/bin/tinyShell.out";
 
-    let mut input_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2]) }.unwrap();
-    let mut output_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut output_ids as *mut [u32; 2]) }.unwrap();
-    let mut err_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut err_ids as *mut [u32; 2]) }.unwrap();
-    let mut signal_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut signal_ids as *mut [u32; 2]) }.unwrap();
-
-    unsafe { syscalls::dup(input_ids[0], Some(STDIN_FILENO)) }.unwrap();
-    unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
-    unsafe { syscalls::dup(err_ids[1], Some(STDERR_FILENO)) }.unwrap();
-
-    let shell_id = unsafe { syscalls::execve(shell.as_ptr(), shell.len(), null(), 0, null(), 0) };
-
-    unsafe { syscalls::dup(serial, Some(STDOUT_FILENO)) }.unwrap();
-    unsafe { syscalls::dup(serial, Some(STDERR_FILENO)) }.unwrap();
-
-    let shell_id = shell_id.unwrap();
-
-    let path = b"/proc/kernel/io/stateful_keyboard";
-    let stdin = unsafe { syscalls::open(path.as_ptr(), path.len(), OpenOptions::READ) }.unwrap();
-    unsafe { syscalls::dup(stdin, Some(STDIN_FILENO)) }.unwrap();
+    let (pipes, shell_id) = init(shell, serial);
 
     println!("spawned shell, hooked to terminal and attached back to serial");
 
-    thread::spawn(move || input_loop(input_ids[1], signal_ids)).unwrap();
-    thread::spawn(move || stderr_handler(err_ids[0], shell_id)).unwrap();
+    thread::spawn(move || input_loop(pipes.input.unwrap().write, pipes.signal.unwrap())).unwrap();
+    thread::spawn(move || stderr_handler(pipes.err.unwrap().read, shell_id)).unwrap();
     println!("background threads started up, we will now handle the shells in and output");
 
-    stdout_handler(output_ids[0], term);
+    stdout_handler(pipes.out.unwrap().read, term);
 
     eprintln!("Stdout handler exited. Shutting down terminal...");
     unsafe { syscalls::exit(0) }
 }
 
-fn input_loop(write_fd: FileDescriptor, signal_fds: [FileDescriptor; 2]) {
+fn input_loop(write_fd: FileDescriptor, signal_fds: PipePair) {
     // first we send the fd, which is coupled to signal pipe read end
-    unsafe { syscalls::write(write_fd, signal_fds[0].to_be_bytes().as_ptr(), 4) }.unwrap();
+    unsafe { syscalls::write(write_fd, signal_fds.read.to_be_bytes().as_ptr(), 4) }.unwrap();
     let mut buf = [0; 64];
     loop {
         unsafe { syscalls::seek(STDIN_FILENO, 0) }.unwrap();
@@ -177,7 +89,7 @@ fn input_loop(write_fd: FileDescriptor, signal_fds: [FileDescriptor; 2]) {
             .collect();
 
         if !signals.is_empty() {
-            unsafe { syscalls::write(signal_fds[1], signals.as_ptr(), signals.len()) }.unwrap();
+            unsafe { syscalls::write(signal_fds.write, signals.as_ptr(), signals.len()) }.unwrap();
         }
         if unsafe { syscalls::write(write_fd, buf.as_ptr(), read) }.is_err() {
             eprintln!("error writing to shel input pipe.");
@@ -199,11 +111,11 @@ fn stderr_handler(input_fd: FileDescriptor, pid: u64) {
     }
 }
 
-fn stdout_handler<B: Backend>(input_fd: FileDescriptor, mut terminal: Terminal<B>) {
+fn stdout_handler<B: Backend>(input_fd: FileDescriptor, mut terminal: TermState<B>) {
     const BUF_SIZE: usize = 1024;
     let mut buf = [0; BUF_SIZE];
     let mut cursor = 0;
-    let conf = CONFIG.get_or_init(|| Config::new());
+    let _conf = CONFIG.get_or_init(|| Config::new());
     loop {
         let read = unsafe {
             syscalls::read(
@@ -215,22 +127,7 @@ fn stdout_handler<B: Backend>(input_fd: FileDescriptor, mut terminal: Terminal<B
         }
         .unwrap();
         if let Ok(r) = str::from_utf8(&buf[..read as usize + cursor]) {
-            terminal
-                .draw(|frame| {
-                    let block = Block::bordered()
-                        .border_style(Style::new().fg(conf.border()).bg(conf.bg()))
-                        .bg(conf.bg())
-                        .title_top(Line::from("Terminal").centered().bold().fg(conf.title()))
-                        .border_type(BorderType::Rounded)
-                        .padding(Padding::new(5, 5, 5, 5));
-                    let paragraph = Paragraph::new(r)
-                        .block(block)
-                        .wrap(Wrap { trim: true })
-                        .fg(conf.text())
-                        .bg(conf.bg());
-                    frame.render_widget(paragraph, frame.area())
-                })
-                .unwrap();
+            terminal.update_state(r);
         }
         cursor += read as usize;
         if cursor >= BUF_SIZE {

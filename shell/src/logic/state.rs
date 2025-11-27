@@ -2,7 +2,10 @@ use alloc::{string::String, vec::Vec};
 use libtinyos::{eprintln, println, serial_println};
 use vte::ansi::Handler;
 
-use crate::logic::jobs::{Command, wait};
+use crate::{
+    drain_stdin,
+    logic::jobs::{Command, wait},
+};
 
 pub struct ShellState {
     input_buf: Vec<char>,
@@ -20,7 +23,12 @@ impl ShellState {
     }
 
     fn extract_command(&self) -> Command {
-        if let Some(arg_split) = self.input_buf.iter().position(|item| item.is_whitespace()) {
+        if let Some(arg_split) = self
+            .input_buf
+            .iter()
+            .skip_while(|item| item.is_whitespace())
+            .position(|item| item.is_whitespace())
+        {
             Command::new(&self.input_buf[..arg_split], &self.input_buf[arg_split..])
         } else {
             Command::bin(&self.input_buf)
@@ -66,7 +74,10 @@ impl Handler for ShellState {
     fn linefeed(&mut self) {
         let command = self.extract_command();
         match command.execute() {
-            Ok(pid) => wait(pid),
+            Ok(pid) => {
+                wait(pid);
+                drain_stdin();
+            }
             Err(e) => {
                 eprintln!("could not spawn process {}:\n{:?}", command, e);
             }

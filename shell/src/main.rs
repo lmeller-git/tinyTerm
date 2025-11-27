@@ -25,6 +25,7 @@ extern "C" fn main() {
     let mut buf = [0; 64];
     let mut handle = ShellState::new();
     let mut parser = Processor::<SimpleTimeout>::new();
+    drain_stdin();
 
     loop {
         let res = unsafe {
@@ -39,4 +40,17 @@ extern "C" fn main() {
 
         parser.advance(&mut handle, &buf[..res as usize]);
     }
+}
+
+fn drain_stdin() {
+    let mut buf = [0; 64];
+    while let Ok(n) = unsafe {
+        syscalls::read(
+            syscalls::STDIN_FILENO,
+            buf.as_mut_ptr(),
+            buf.len(),
+            -1_i64 as usize,
+        )
+    } && n > 0
+    {}
 }
