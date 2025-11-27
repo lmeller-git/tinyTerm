@@ -1,6 +1,7 @@
 use std::{env, path::Path, process::Command};
 
 fn main() {
+    println!("cargo:rerun-if-changed=NULL");
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let out_dir = env::var("OUT_DIR").unwrap();
     let out_dir_path = Path::new(&out_dir);
