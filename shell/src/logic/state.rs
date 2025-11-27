@@ -26,10 +26,20 @@ impl ShellState {
         if let Some(arg_split) = self
             .input_buf
             .iter()
+            .skip(1) // skip injected prompt
             .skip_while(|item| item.is_whitespace())
             .position(|item| item.is_whitespace())
         {
-            Command::new(&self.input_buf[..arg_split], &self.input_buf[arg_split..])
+            let skipped = self
+                .input_buf
+                .iter()
+                .skip(1)
+                .skip_while(|item| item.is_whitespace())
+                .count();
+            Command::new(
+                &self.input_buf[skipped..arg_split + skipped],
+                &self.input_buf[skipped + arg_split..],
+            )
         } else {
             Command::bin(&self.input_buf)
         }
