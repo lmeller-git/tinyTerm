@@ -58,7 +58,7 @@ impl ShellState {
         }
     }
     fn is_empty(&self) -> bool {
-        self.input_buf.len() > PROMPT.chars().count()
+        self.input_buf.len() == PROMPT.chars().count()
     }
 }
 
