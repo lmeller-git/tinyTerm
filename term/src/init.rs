@@ -29,13 +29,13 @@ impl From<[u32; 2]> for PipePair {
 
 pub fn init(shell: &str, stdout: FileDescriptor) -> (OpenPipes, u64) {
     let mut input_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2]) }.unwrap();
+    unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2], 32) }.unwrap();
     let mut output_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut output_ids as *mut [u32; 2]) }.unwrap();
+    unsafe { syscalls::pipe(&mut output_ids as *mut [u32; 2], -1) }.unwrap();
     let mut err_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut err_ids as *mut [u32; 2]) }.unwrap();
+    unsafe { syscalls::pipe(&mut err_ids as *mut [u32; 2], -1) }.unwrap();
     let mut signal_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut signal_ids as *mut [u32; 2]) }.unwrap();
+    unsafe { syscalls::pipe(&mut signal_ids as *mut [u32; 2], -1) }.unwrap();
 
     unsafe { syscalls::dup(input_ids[0], Some(STDIN_FILENO)) }.unwrap();
     unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
@@ -51,6 +51,9 @@ pub fn init(shell: &str, stdout: FileDescriptor) -> (OpenPipes, u64) {
     let path = b"/proc/kernel/io/stateful_keyboard";
     let stdin = unsafe { syscalls::open(path.as_ptr(), path.len(), OpenOptions::READ) }.unwrap();
     unsafe { syscalls::dup(stdin, Some(STDIN_FILENO)) }.unwrap();
+    // first we send the fd, which is coupled to signal pipe read end
+    unsafe { syscalls::write(input_ids[1], signal_ids[0].to_be_bytes().as_ptr(), 4) }.unwrap();
+
     (
         OpenPipes {
             input: Some(input_ids.into()),
