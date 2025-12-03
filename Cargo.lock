@@ -197,6 +197,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f8a2ca5ac02d09563609681103aada9e1777d54fc57a5acd7a41404f9c93b6e"
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -443,7 +458,7 @@ checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 [[package]]
 name = "libtinyos"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#f7dcdf43ba92002eb2c523a0e461bb7f0ed06177"
+source = "git+https://github.com/lmeller-git/libtinyos#436f0497792512722fc77a78e6f94b891d9099da"
 dependencies = [
  "bitflags",
  "cbindgen",
@@ -842,6 +857,7 @@ name = "tinyTerm"
 version = "0.1.0"
 dependencies = [
  "conquer-once",
+ "crossbeam-queue",
  "libtinyos",
  "mousefood",
  "ratatui",
@@ -853,7 +869,7 @@ dependencies = [
 [[package]]
 name = "tinygraphics"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#f7dcdf43ba92002eb2c523a0e461bb7f0ed06177"
+source = "git+https://github.com/lmeller-git/libtinyos#436f0497792512722fc77a78e6f94b891d9099da"
 dependencies = [
  "cbindgen",
  "conquer-once",
@@ -866,7 +882,7 @@ dependencies = [
 [[package]]
 name = "tinyos_abi"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/tinyOS#ec8b7c7f0b8bb53e44134aa615ebc48ad1b5faa8"
+source = "git+https://github.com/lmeller-git/tinyOS#0671e5940e27ea3a13df3ac87dd84e671f38febd"
 dependencies = [
  "bitflags",
  "x86_64",
