@@ -1,12 +1,17 @@
+use alloc::sync::Arc;
+use crossbeam_queue::SegQueue;
 use libtinyos::{
     eprint, eprintln,
     syscalls::{self, FileDescriptor},
 };
-use ratatui::prelude::Backend;
 
-use crate::state::TermState;
+use crate::state::EventPacket;
 
-pub fn stderr_handler(input_fd: FileDescriptor, pid: u64) {
+pub fn stderr_handler(
+    input_fd: FileDescriptor,
+    pid: u64,
+    _event_queue: Arc<SegQueue<EventPacket>>,
+) {
     let mut buf = [0; 64];
     loop {
         let read =
@@ -20,27 +25,13 @@ pub fn stderr_handler(input_fd: FileDescriptor, pid: u64) {
     }
 }
 
-pub fn stdout_handler<B: Backend>(input_fd: FileDescriptor, mut terminal: TermState<B>) {
+pub fn stdout_handler(input_fd: FileDescriptor, event_queue: Arc<SegQueue<EventPacket>>) {
     const BUF_SIZE: usize = 1024;
     let mut buf = [0; BUF_SIZE];
-    let mut cursor = 0;
     loop {
-        let read = unsafe {
-            syscalls::read(
-                input_fd,
-                buf[cursor..].as_mut_ptr(),
-                buf.len() - cursor,
-                -1_i64 as usize,
-            )
-        }
-        .unwrap();
-        if let Ok(r) = str::from_utf8(&buf[..read as usize + cursor]) {
-            terminal.update_state(r);
-        }
-        cursor += read as usize;
-        if cursor >= BUF_SIZE {
-            cursor = 0;
-            buf.fill(0);
-        }
+        let read = unsafe { syscalls::read(input_fd, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
+            .unwrap() as usize;
+
+        event_queue.push(buf[..read].as_ref().into());
     }
 }
