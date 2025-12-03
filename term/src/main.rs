@@ -55,7 +55,7 @@ pub extern "C" fn main() -> ! {
 
     println!("terminal hooked into serial, attached fb");
 
-    let shell = "/ram/bin/shell";
+    let shell = "/ram/bin/tinyShell.out";
 
     let (pipes, shell_id) = init(shell, serial);
 
