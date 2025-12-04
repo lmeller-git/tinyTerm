@@ -1,2 +1,2 @@
 # tinyTerm
-default terminal emulator for tinyOS
+default terminal emulator and shell for tinyOS
