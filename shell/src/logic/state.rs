@@ -63,7 +63,7 @@ impl ShellState {
     }
 
     fn inject_prompt(&mut self) {
-        println!("\n\rtinyos:/");
+        println!("tinyos:/");
         print!("\r{}", PROMPT);
         self.input_buf.extend(PROMPT.chars());
         self.inc_cursor(PROMPT.chars().count());
@@ -118,7 +118,7 @@ impl Handler for ShellState {
     }
 
     fn linefeed(&mut self) {
-        self.input('\n');
+        print!("\n");
         let command = self.extract_command();
         match command.execute() {
             Ok(pid) => {
@@ -130,16 +130,17 @@ impl Handler for ShellState {
             }
         }
         self.newline();
+        self.inject_prompt();
     }
 
     fn carriage_return(&mut self) {
         self.clear();
-        self.input('\r');
+        print!("\r");
     }
 
     fn newline(&mut self) {
+        print!("\n");
         self.carriage_return();
-        self.inject_prompt();
     }
 
     fn backspace(&mut self) {

@@ -125,37 +125,28 @@ impl<B: Backend> TermState<B> {
         }
     }
 
-    // pub fn update_state(&mut self, line: &str) {
-    //     self.rows.last_mut().unwrap().replace_range(.., line);
-    //     self.draw();
-    // }
-
     fn parse_stream(&mut self, parser: &mut Processor<SimpleTimeout>, bytes: &[u8]) {
         parser.advance(self, bytes);
     }
-
-    // pub fn commit(&mut self) {
-    //     self.rows.push(String::new());
-    //     if self.rows.len() + GRACE >= MAX_LINES {
-    //         self.rows.drain(..GRACE);
-    //     }
-    //     self.visible.from = self.rows.len();
-    //     self.visible.count = MAX_VISIBLE_LINES.min(self.rows.len().saturating_sub(1));
-    // }
 
     fn add_line(&mut self) {
         self.rows.push(BufferLine::new());
         self.dirty.partial();
         if self.rows.len() + GRACE >= MAX_LINES {
             self.rows.drain(..GRACE);
+            self._cursor.row = self._cursor.row.saturating_sub(GRACE);
         }
         if self.rows.len() > MAX_VISIBLE_LINES {
-            self.visible.from += 1;
+            self.visible.from =
+                (self.visible.from + 1).min(self.rows.len().saturating_sub(self.visible.count));
             self.dirty.up();
         }
-        self.visible.count = MAX_VISIBLE_LINES.min(self.rows.len());
+        self.visible.count = (self.visible.count + 1)
+            .min(MAX_VISIBLE_LINES)
+            .min(self.rows.len().saturating_sub(self.visible.from))
+            .max(1);
         self._cursor.col = 0;
-        self._cursor.row += 1;
+        self._cursor.row = (self._cursor.row + 1).min(self.rows.len() - 1);
     }
 
     fn draw(&mut self) {
@@ -262,11 +253,13 @@ impl<B: Backend> Handler for TermState<B> {
     }
 
     fn linefeed(&mut self) {
+        serial_println!("[TERM] Line feed");
         self.add_line();
         self.dirty.partial();
     }
 
     fn newline(&mut self) {
+        serial_println!("[TERM] new line");
         self.linefeed();
         self.carriage_return();
         self.dirty.up();
