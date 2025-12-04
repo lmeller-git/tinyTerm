@@ -143,8 +143,14 @@ impl Handler for ShellState {
         self.carriage_return();
     }
 
+    fn put_tab(&mut self, _count: u16) {
+        for _ in 0.._count {
+            self.input('\t');
+        }
+    }
+
     fn backspace(&mut self) {
-        if !self.is_empty() && self.cursor > PROMPT.chars().count() + 1 {
+        if !self.is_empty() && self.cursor > PROMPT.chars().count() {
             self.input_buf.remove(self.cursor - 1);
             self.move_backward(1);
             print!("\r{}", self.input_buf.iter().collect::<String>());

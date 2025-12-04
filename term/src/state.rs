@@ -1,4 +1,4 @@
-use core::time::Duration;
+use core::{ops::RangeBounds, time::Duration};
 
 use alloc::{string::String, vec, vec::Vec};
 use libtinyos::{serial_println, syscalls};
@@ -15,7 +15,8 @@ use crate::parse::Config;
 
 const MAX_LINES: usize = 128;
 const GRACE: usize = 16;
-const MAX_VISIBLE_LINES: usize = 16;
+const MAX_VISIBLE_LINES: usize = 64;
+const TAB_WIDTH: usize = 3;
 
 pub trait EventHandler {
     fn process_events(&mut self, events: EventPacket);
@@ -87,7 +88,14 @@ impl BufferLine {
     }
 
     fn to_string(&self) -> String {
-        self.inner.iter().collect()
+        let mut s = String::with_capacity(self.len());
+        for c in self.inner.iter() {
+            match c {
+                '\t' => s.extend(&[' '; TAB_WIDTH]),
+                c => s.push(*c),
+            }
+        }
+        s
     }
 
     fn len(&self) -> usize {
@@ -100,6 +108,14 @@ impl BufferLine {
 
     fn clear(&mut self) {
         self.inner.clear();
+    }
+
+    fn extend(&mut self, items: impl Iterator<Item = char>) {
+        self.inner.extend(items);
+    }
+
+    fn splice(&mut self, range: impl RangeBounds<usize>, items: impl Iterator<Item = char>) {
+        self.inner.splice(range, items);
     }
 }
 
@@ -173,7 +189,7 @@ impl<B: Backend> TermState<B> {
                     .padding(Padding::new(5, 5, 5, 5));
                 let paragraph = Paragraph::new(lines)
                     .block(block)
-                    .wrap(Wrap { trim: true })
+                    .wrap(Wrap { trim: false })
                     .fg(self.config.text())
                     .bg(self.config.bg());
                 frame.render_widget(paragraph, frame.area())
@@ -239,8 +255,9 @@ impl<B: Backend> Handler for TermState<B> {
 
     fn move_down(&mut self, _: usize) {}
 
-    fn move_forward(&mut self, col: usize) {
-        self._cursor.col += col;
+    fn move_forward(&mut self, by: usize) {
+        let Cursor { row, col } = self._cursor;
+        self._cursor.col = (col + by).min(self.rows.get(row).unwrap().len());
         self.dirty.partial();
     }
 
@@ -263,6 +280,19 @@ impl<B: Backend> Handler for TermState<B> {
         self.linefeed();
         self.carriage_return();
         self.dirty.up();
+    }
+
+    fn put_tab(&mut self, count: u16) {
+        serial_println!("[TERM] put tab");
+        let Cursor { row, col } = self._cursor;
+        let s = self.rows.get_mut(row).unwrap();
+        if col == s.len() {
+            s.extend((0..count).map(|_| '\t'));
+        } else {
+            s.splice(col..=col, (0..count).map(|_| '\t'));
+        }
+        self.move_forward(count as usize);
+        self.dirty.partial();
     }
 
     fn bell(&mut self) {}
