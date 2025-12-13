@@ -1,5 +1,6 @@
 use core::{
     fmt::Display,
+    iter::Peekable,
     ptr::null,
     sync::atomic::{AtomicBool, AtomicU64},
 };
@@ -14,11 +15,178 @@ use libtinyos::{
 
 use crate::{
     logic::trim_string_in_place,
-    parse::{Token, Tokenizer_},
+    parse::{self, RedirectionMode, Token, TokenParseError, TokenStream, Tokenizer_},
 };
 
 pub static CURRENT_FG: AtomicU64 = AtomicU64::new(0);
 pub static WE_ARE_FG: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug)]
+pub struct Command_<'a> {
+    bin: &'a str,
+    args: Vec<&'a str>,
+    redirections: Vec<Redirection_<'a>>,
+    chained: Option<Pipe_<'a>>,
+}
+
+impl<'a> Command_<'a> {
+    pub fn build(tokenstream: &mut Peekable<impl Iterator<Item = Token<'a>>>) -> Option<Self> {
+        // prompt for a single job looks like
+        // <bin> <args> <redirs> <pipe>
+        // we ignore all whitespace
+        let Token::Literal(bin) = consume_next_with_whitespace(tokenstream)? else {
+            return None;
+        };
+
+        let mut args = Vec::new();
+        collect_all(tokenstream, &mut |token| {
+            match token {
+                Token::Literal(lit) => args.push(*lit),
+                Token::WhiteSpace(_) => {}
+                _ => return false,
+            }
+            true
+        });
+
+        let mut redirections = Vec::new();
+        let mut current_redir: Option<parse::Redirection> = None;
+
+        while let Some(next) = tokenstream.peek() {
+            match next {
+                Token::Literal(lit) => {
+                    if let Some(current) = current_redir.take() {
+                        redirections.push(Redirection_ {
+                            fds: current.from,
+                            mode: current.mode,
+                            file: lit,
+                        });
+                    } else {
+                        break;
+                    }
+                }
+                Token::Redirection(redir) => {
+                    if let Some(_) = current_redir.replace(redir.clone()) {
+                        return None;
+                    }
+                }
+                Token::WhiteSpace(_) => {}
+                _ => break,
+            }
+            tokenstream.next();
+        }
+
+        let mut zelf = Command_ {
+            bin,
+            args,
+            redirections,
+            chained: None,
+        };
+
+        if let Some(Token::Pipe) = consume_next_with_whitespace(tokenstream)
+            && let Some(next) = Command_::build(tokenstream)
+        {
+            let pipe = Pipe_ { to: next.into() };
+            zelf.chained = Some(pipe);
+        }
+
+        Some(zelf)
+    }
+
+    pub fn execute_all(&self) -> SysCallRes<ExecutionContext> {
+        let mut ctx = ExecutionContext {
+            running: Vec::new(),
+        };
+
+        // for each process:
+        // 1: open files for redir and pipe and dup
+        // 2: execute
+        // 3: cleanup fds -> close + restore old
+        // 4: if fail to execute: kill all previous + exit
+        // 5: setup pipe for next process
+        // 6: next ->
+
+        struct ExecCleanup {
+            ctx: ExecutionContext,
+            should_restore: Vec<(FileDescriptor, FileDescriptor)>,
+            should_close: Vec<FileDescriptor>,
+        }
+
+        impl Drop for ExecCleanup {
+            fn drop(&mut self) {}
+        }
+
+        let mut exec_cleanup = ExecCleanup {
+            ctx,
+            should_restore: Vec::new(),
+            should_close: Vec::new(),
+        };
+
+        let mut current = self;
+
+        loop {
+            // let mut redir_cleanup = Vec::with_capacity(current.redirections.len());
+            for redir in &current.redirections {
+                let new_open = unsafe {
+                    syscalls::open(redir.file.as_ptr(), redir.file.len(), redir.mode.into())
+                };
+            }
+
+            break;
+        }
+
+        Ok(ctx)
+    }
+
+    fn execute_one(&self) -> SysCallRes<u64> {
+        let res = unsafe { 0 };
+
+        todo!()
+    }
+}
+
+pub struct ExecutionContext {
+    running: Vec<u64>,
+}
+
+impl ExecutionContext {
+    pub fn exit_all(&self) {}
+
+    pub fn wait_all(&self) {}
+}
+
+fn collect_all<'a>(
+    stream: &mut Peekable<impl Iterator<Item = Token<'a>>>,
+    eval: &mut impl FnMut(&Token<'a>) -> bool,
+) {
+    while let Some(t) = stream.peek()
+        && eval(t)
+    {
+        stream.next();
+    }
+}
+
+fn consume_next_with_whitespace<'a>(
+    stream: &mut impl Iterator<Item = Token<'a>>,
+) -> Option<Token<'a>> {
+    let next = stream.next()?;
+    if next.is_whitespace() {
+        stream.next()
+    } else {
+        Some(next)
+    }
+}
+
+#[derive(Debug)]
+struct Pipe_<'a> {
+    to: Box<Command_<'a>>,
+}
+
+#[derive(Debug)]
+struct Redirection_<'a> {
+    fds: Vec<FileDescriptor>,
+    mode: RedirectionMode,
+    file: &'a str,
+}
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Command {

@@ -61,14 +61,24 @@ pub enum Token<'a> {
     EOF,
 }
 
+impl<'a> Token<'a> {
+    pub fn is_whitespace(&self) -> bool {
+        if let Self::WhiteSpace(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Redirection {
-    from: Vec<FileDescriptor>,
-    mode: RedirectionMode,
+    pub from: Vec<FileDescriptor>,
+    pub mode: RedirectionMode,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Copy)]
-enum RedirectionMode {
+pub enum RedirectionMode {
     Empty,
     Read,
     Write,
