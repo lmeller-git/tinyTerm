@@ -90,9 +90,9 @@ pub enum RedirectionMode {
 impl Into<OpenOptions> for RedirectionMode {
     fn into(self) -> OpenOptions {
         match self {
-            Self::Read => OpenOptions::READ,
-            Self::Write => OpenOptions::WRITE,
-            Self::WriteAppend => OpenOptions::WRITE | OpenOptions::APPEND,
+            Self::Read => OpenOptions::READ | OpenOptions::CREATE,
+            Self::Write => OpenOptions::WRITE | OpenOptions::CREATE | OpenOptions::TRUNCATE,
+            Self::WriteAppend => OpenOptions::WRITE | OpenOptions::APPEND | OpenOptions::CREATE,
             _ => OpenOptions::empty(),
         }
     }
