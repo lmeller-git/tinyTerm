@@ -848,6 +848,7 @@ name = "tinyShell"
 version = "0.1.0"
 dependencies = [
  "libtinyos",
+ "spin",
  "tinygraphics",
  "vte",
 ]

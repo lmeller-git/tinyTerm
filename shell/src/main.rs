@@ -15,6 +15,7 @@ use crate::{
 mod init;
 mod io;
 mod logic;
+pub mod parse;
 
 #[unsafe(no_mangle)]
 extern "C" fn main() {

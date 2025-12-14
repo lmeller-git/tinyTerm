@@ -7,7 +7,8 @@ use vte::ansi::Handler;
 
 use crate::{
     drain_stdin,
-    logic::jobs::{Command, wait},
+    logic::jobs::{Command_, wait_},
+    parse::Tokenizer_,
 };
 
 const PROMPT: &str = "> ";
@@ -33,28 +34,6 @@ impl ShellState {
         };
         shell.inject_prompt();
         shell
-    }
-
-    fn extract_command(&self) -> Command {
-        let prompt_len = PROMPT.chars().count();
-        let Some(should_skip) = self
-            .input_buf
-            .iter()
-            .skip(prompt_len) // prompt
-            .position(|item| !item.is_whitespace())
-            .map(|pos| pos + prompt_len)
-        else {
-            return Command::bin([].as_slice());
-        };
-
-        let mut splits = self.input_buf[should_skip..].splitn(2, |item| item.is_whitespace());
-
-        let bin_name = splits.next().unwrap_or([].as_slice());
-        if let Some(args) = splits.next() {
-            Command::new(bin_name, args)
-        } else {
-            Command::bin(bin_name)
-        }
     }
 
     fn clear(&mut self) {
@@ -84,7 +63,6 @@ impl ShellState {
 
 impl Handler for ShellState {
     fn input(&mut self, c: char) {
-        serial_println!("[input] {c}");
         if self.cursor == self.input_buf.len() {
             self.input_buf.push(c);
             print!("{c}");
@@ -119,14 +97,25 @@ impl Handler for ShellState {
 
     fn linefeed(&mut self) {
         print!("\n");
-        let command = self.extract_command();
-        match command.execute() {
-            Ok(pid) => {
-                wait(pid);
-                drain_stdin();
-            }
-            Err(e) => {
-                eprintln!("could not spawn process {}:\n{:?}", command, e);
+        let line = self
+            .input_buf
+            .iter()
+            .skip(PROMPT.chars().count())
+            .collect::<String>();
+
+        if let Ok(stream) = Tokenizer_::new(&line)
+            .tokenize()
+            .inspect_err(|e| serial_println!("tokenize: {:?}", e))
+            && let Some(cmd) = Command_::build(&mut stream.into_iter().peekable())
+        {
+            match cmd.execute_all() {
+                Ok(pid) => {
+                    _ = wait_(pid);
+                    drain_stdin();
+                }
+                Err(e) => {
+                    eprintln!("could not spawn process {}:\n{:?}", cmd, e);
+                }
             }
         }
         self.newline();
