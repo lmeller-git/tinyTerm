@@ -19,7 +19,9 @@
 use core::ops::{Deref, DerefMut};
 
 use alloc::vec::{self, Vec};
-use libtinyos::syscalls::{FileDescriptor, OpenOptions, STDERR_FILENO, STDOUT_FILENO};
+use libtinyos::syscalls::{
+    FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
+};
 
 pub struct TokenStream<'a> {
     inner: Vec<Token<'a>>,
@@ -137,7 +139,9 @@ impl<'a> Tokenizer_<'a> {
             s if s.starts_with(['\'', '\"']) => self.parse_literal(),
             s if s.starts_with('|') => self.parse_pipe(), // pipe: |
             s if s.starts_with(['>', '<'])
-                | s.chars().nth(2).is_some_and(|c| matches!(c, '>' | '<')) =>
+                | (s.chars().next().is_some_and(|c| c.is_digit(10))
+                    && s.chars().nth(1).is_some_and(|c| c == '>'))
+                | s.starts_with("&>") =>
             {
                 self.parse_redir() // redir: >*  or <* or n>* or n<*
             }
@@ -161,10 +165,11 @@ impl<'a> Tokenizer_<'a> {
     }
 
     fn parse_redir(&mut self) -> Result<Token<'a>, TokenParseError> {
-        let dual = if let Some(c) = self.src[self.cursor..].chars().next()
-            && c == '&'
-        {
+        let dual = if self.src[self.cursor..].starts_with("&>") {
             self.checked_inc('&', |zelf| {
+                Err(TokenParseError::MalformedInput(zelf.cursor))
+            })?;
+            self.checked_inc('>', |zelf| {
                 Err(TokenParseError::MalformedInput(zelf.cursor))
             })?;
             true
@@ -172,7 +177,7 @@ impl<'a> Tokenizer_<'a> {
             false
         };
 
-        let fd = if !dual
+        let mut fd = if !dual
             && let Some(c) = self.src[self.cursor..].chars().next()
             && let Some(digit) = c.to_digit(10)
         {
@@ -185,15 +190,23 @@ impl<'a> Tokenizer_<'a> {
         let mode = match &self.src[self.cursor..] {
             s if s.starts_with(">>") => {
                 self.cursor += '>'.len_utf8() * 2;
+                if fd.is_none() {
+                    fd.replace(STDOUT_FILENO);
+                }
                 RedirectionMode::WriteAppend
             }
             s if s.starts_with("<") => {
                 self.inc('<');
+                if fd.is_none() {
+                    fd.replace(STDIN_FILENO);
+                }
                 RedirectionMode::Read
             }
             s if s.starts_with(">") => {
                 self.inc('>');
-
+                if fd.is_none() {
+                    fd.replace(STDOUT_FILENO);
+                }
                 RedirectionMode::Write
             }
             _ => return Err(TokenParseError::MalformedInput(self.cursor)),
@@ -203,6 +216,7 @@ impl<'a> Tokenizer_<'a> {
         if let Some(fd) = fd {
             srcs.push(fd);
         }
+
         if dual {
             srcs.extend_from_slice(&[STDOUT_FILENO, STDERR_FILENO]);
         }

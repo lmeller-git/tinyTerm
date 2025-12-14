@@ -7,7 +7,7 @@ use vte::ansi::Handler;
 
 use crate::{
     drain_stdin,
-    logic::jobs::{Command_, wait, wait_},
+    logic::jobs::{Command_, wait_},
     parse::Tokenizer_,
 };
 
@@ -35,25 +35,6 @@ impl ShellState {
         shell.inject_prompt();
         shell
     }
-
-    // fn extract_command(&self) -> Option<Command_> {
-    //     let prompt_len = PROMPT.chars().count();
-    //     let Some(should_skip) = self
-    //         .input_buf
-    //         .iter()
-    //         .skip(prompt_len) // prompt
-    //         .position(|item| !item.is_whitespace())
-    //         .map(|pos| pos + prompt_len)
-    //     else {
-    //         return None;
-    //     };
-
-    //     let input_buf = self.input_buf[should_skip..].iter().collect::<String>();
-
-    //     let stream = Tokenizer_::new(&input_buf).tokenize().ok()?;
-
-    //     Command_::build(&mut stream.into_iter().peekable())
-    // }
 
     fn clear(&mut self) {
         self.input_buf.clear();
@@ -121,7 +102,10 @@ impl Handler for ShellState {
             .iter()
             .skip(PROMPT.chars().count())
             .collect::<String>();
-        if let Ok(stream) = Tokenizer_::new(&line).tokenize()
+
+        if let Ok(stream) = Tokenizer_::new(&line)
+            .tokenize()
+            .inspect_err(|e| serial_println!("tokenize: {:?}", e))
             && let Some(cmd) = Command_::build(&mut stream.into_iter().peekable())
         {
             match cmd.execute_all() {
@@ -134,16 +118,6 @@ impl Handler for ShellState {
                 }
             }
         }
-        // let command = self.extract_command();
-        // match command.execute() {
-        //     Ok(pid) => {
-        //         wait(pid);
-        //         drain_stdin();
-        //     }
-        //     Err(e) => {
-        //         eprintln!("could not spawn process {}:\n{:?}", command, e);
-        //     }
-        // }
         self.newline();
         self.inject_prompt();
     }
