@@ -228,10 +228,10 @@ impl<'a> Tokenizer_<'a> {
             Ok(Token::WhiteSpace(&self.src[start..self.cursor]))
         } else {
             for c in self.src[self.cursor..].chars() {
-                self.inc(c);
                 if c.is_whitespace() || matches!(c, '|' | '>' | '<') {
                     break;
                 }
+                self.inc(c);
             }
             Ok(Token::Literal(&self.src[start..self.cursor]))
         }
