@@ -4,7 +4,7 @@
 
 echo "building tinyTerm in $(pwd)..."
 
-cargo build --release
+cargo build --release --target target.json -Zjson-target-spec
 
 echo "tinyTerm built"
 echo "creating symlinks to shell and term in top level dirs..."

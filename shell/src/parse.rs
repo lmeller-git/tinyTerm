@@ -1,27 +1,13 @@
-// Tokenizer builds a TokenStream from input string, we then parse the TokenStream into Commands
-//
-// in the end we want to be able to:
-// let command = Command::new(input: &str);
-// --> this should parse the input into a chain of commands
-// command.execute()
-// --> this should execute the top level command and walk along the chain of "child" commands
-// --> thus a command should have a ref to its bin, argc, argv, filedescriptoe redirections/pipes and "child" commands
-// --> sth like
-// Command {
-//  bin: Bin(&str),
-//  argc: Argc(&str),
-//  env: Env(&str),
-//  chained: Option<Box<Command>>,
-//  redirections: Vec<Redirection>
-// }
-// This could be parsed from a TokenStream loike [Bin(&str), Argc(&str), Redirection(_), Redirection(_), Pipe, ....]
-
 use core::ops::{Deref, DerefMut};
 
 use alloc::vec::{self, Vec};
+use conquer_once::spin::OnceCell;
 use libtinyos::syscalls::{
     FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
 };
+use regex::Regex;
+
+static PIPE_REGEX: OnceCell<Regex> = OnceCell::uninit();
 
 pub struct TokenStream<'a> {
     inner: Vec<Token<'a>>,
@@ -58,7 +44,7 @@ impl<'a> IntoIterator for TokenStream<'a> {
 pub enum Token<'a> {
     Literal(&'a str),
     WhiteSpace(&'a str),
-    Pipe,
+    Pipe(Pipe),
     Redirection(Redirection),
     EOF,
 }
@@ -71,6 +57,12 @@ impl<'a> Token<'a> {
             false
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pipe {
+    pub from: Vec<FileDescriptor>,
+    pub to: FileDescriptor,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -137,9 +129,19 @@ impl<'a> Tokenizer_<'a> {
         }
         match &self.src[self.cursor..] {
             s if s.starts_with(['\'', '\"']) => self.parse_literal(),
-            s if s.starts_with('|') => self.parse_pipe(), // pipe: |
+            s if s.starts_with('|')
+                | (s.chars()
+                    .next()
+                    .is_some_and(|c| c == '&' || c.is_ascii_digit())
+                    && s.chars().nth(1).is_some_and(|c| c == '|'))
+                | PIPE_REGEX
+                    .get_or_init(|| regex::Regex::new(r"^&\d+(?:,\d+)*\|").unwrap())
+                    .is_match(s) =>
+            {
+                self.parse_pipe()
+            } // pipe: |, ...
             s if s.starts_with(['>', '<'])
-                | (s.chars().next().is_some_and(|c| c.is_digit(10))
+                | (s.chars().next().is_some_and(|c| c.is_ascii_digit())
                     && s.chars().nth(1).is_some_and(|c| c == '>'))
                 | s.starts_with("&>") =>
             {
@@ -154,14 +156,55 @@ impl<'a> Tokenizer_<'a> {
     }
 
     fn parse_pipe(&mut self) -> Result<Token<'a>, TokenParseError> {
-        if let Some(next_char) = self.src.chars().nth(self.cursor)
-            && next_char == '|'
-        {
-            self.inc('|');
-            Ok(Token::Pipe)
+        // | or num| or num1|num2 or &| or &num,*|
+        let dual = if self.src[self.cursor..].starts_with("&|") {
+            self.checked_inc('&', |zelf| {
+                Err(TokenParseError::MalformedInput(zelf.cursor))
+            })?;
+            self.checked_inc('|', |zelf| {
+                Err(TokenParseError::MalformedInput(zelf.cursor))
+            })?;
+            true
         } else {
-            Err(TokenParseError::SrcConsumed)
+            false
+        };
+
+        let in_fds = if !dual {
+            let digit = self.parse_num().unwrap_or(STDOUT_FILENO);
+            alloc::vec![digit]
+        } else {
+            let mut v = Vec::new();
+            while let Ok(num) = self.parse_num() {
+                v.push(num);
+                if !self.src.bytes().nth(self.cursor).is_some_and(|c| c == b',') {
+                    break;
+                }
+                self.inc(',');
+            }
+            if v.is_empty() {
+                v.extend_from_slice(&[STDOUT_FILENO, STDERR_FILENO]);
+            }
+            if v.len() < 2 {
+                return Err(TokenParseError::MalformedInput(self.cursor));
+            }
+            v
+        };
+
+        if !self.src.bytes().nth(self.cursor).is_some_and(|c| c == b'|') {
+            return Err(TokenParseError::MalformedInput(self.cursor));
         }
+        self.inc('|');
+
+        let out_fd = if let Ok(num) = self.parse_num() {
+            num
+        } else {
+            STDIN_FILENO
+        };
+
+        Ok(Token::Pipe(Pipe {
+            from: in_fds,
+            to: out_fd,
+        }))
     }
 
     fn parse_redir(&mut self) -> Result<Token<'a>, TokenParseError> {
@@ -177,12 +220,8 @@ impl<'a> Tokenizer_<'a> {
             false
         };
 
-        let mut fd = if !dual
-            && let Some(c) = self.src[self.cursor..].chars().next()
-            && let Some(digit) = c.to_digit(10)
-        {
-            self.checked_inc(c, |zelf| Err(TokenParseError::MalformedInput(zelf.cursor)))?;
-            Some(digit)
+        let mut fd = if !dual && let Ok(num) = self.parse_num() {
+            Some(num)
         } else {
             None
         };
@@ -251,6 +290,23 @@ impl<'a> Tokenizer_<'a> {
         }
     }
 
+    fn parse_num<T: From<u32>>(&mut self) -> Result<T, TokenParseError> {
+        let mut num = 0;
+        let mut chars = self.src[self.cursor..].bytes();
+        while let Some(c) = chars.next()
+            && c.is_ascii_digit()
+        {
+            num *= 10;
+            num += char::from_u32(c as u32)
+                .ok_or(TokenParseError::MalformedInput(self.cursor))?
+                .to_digit(10)
+                .ok_or(TokenParseError::MalformedInput(self.cursor))?;
+            self.cursor += 1;
+        }
+
+        Ok(num.into())
+    }
+
     fn inc(&mut self, by: char) {
         self.cursor += by.len_utf8();
     }
@@ -275,12 +331,3 @@ pub enum TokenParseError {
     SrcConsumed,
     MalformedInput(usize),
 }
-
-//
-// we have currently: This is TODO
-// redirection: one of
-// > | >> | < | num> | num>> | &> | &>> | &num> | &num>>
-// pipe: one of
-// | | &| | num>| (this could also be interpreted as redirection)
-// literal
-// whitespace

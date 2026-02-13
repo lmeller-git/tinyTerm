@@ -41,7 +41,9 @@ pub fn init(shell: &str, stdout: FileDescriptor) -> (OpenPipes, u64) {
     unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(err_ids[1], Some(STDERR_FILENO)) }.unwrap();
 
-    let shell_id = unsafe { syscalls::execve(shell.as_ptr(), shell.len(), null(), 0, null(), 0) };
+    let shell_id = unsafe {
+        syscalls::spawn_process(shell.as_ptr(), shell.len(), 0, null(), 0, null(), null(), 0)
+    };
 
     unsafe { syscalls::dup(stdout, Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(stdout, Some(STDERR_FILENO)) }.unwrap();

@@ -1,10 +1,13 @@
-use core::{fmt::Display, iter::Peekable, ptr::null, sync::atomic::AtomicBool};
+use core::{
+    fmt::Display, iter::Peekable, marker::PhantomData, ptr::null, sync::atomic::AtomicBool,
+};
 
 use alloc::{boxed::Box, vec::Vec};
+use hashbrown::HashMap;
 use libtinyos::{
-    serial_println,
+    eprintln, serial_println,
     syscalls::{
-        self, FileDescriptor, STDIN_FILENO, STDOUT_FILENO, SysCallRes, TaskWaitOptions, WaitOptions,
+        self, FDAction, FileDescriptor, OpenOptions, SysCallRes, TaskWaitOptions, WaitOptions,
     },
 };
 use spin::Mutex;
@@ -18,8 +21,8 @@ pub static CURRENT_CTX: Mutex<Option<ExecutionContext>> = Mutex::new(None);
 pub struct Command_<'a> {
     bin: &'a str,
     args: Vec<&'a str>,
-    redirections: Vec<Redirection_<'a>>,
-    chained: Option<Pipe_<'a>>,
+    redirections: Vec<Redirection<'a>>,
+    chained: Option<Pipe<'a>>,
 }
 
 impl Display for Command_<'_> {
@@ -59,7 +62,7 @@ impl<'a> Command_<'a> {
             match next {
                 Token::Literal(lit) => {
                     if let Some(current) = current_redir.take() {
-                        redirections.push(Redirection_ {
+                        redirections.push(Redirection {
                             fds: current.from,
                             mode: current.mode,
                             file: lit,
@@ -86,12 +89,30 @@ impl<'a> Command_<'a> {
             chained: None,
         };
 
-        if let Some(Token::Pipe) = consume_next_with_whitespace(tokenstream)
+        let mut connections = HashMap::new();
+
+        collect_all(tokenstream, &mut |token| {
+            match token {
+                Token::Pipe(p) => {
+                    for from in &p.from {
+                        connections
+                            .entry(p.to)
+                            .and_modify(|entry: &mut Vec<FileDescriptor>| entry.push(*from))
+                            .or_insert(alloc::vec![*from]);
+                    }
+                }
+                Token::WhiteSpace(_) => {}
+                _ => return false,
+            }
+            true
+        });
+
+        if !connections.is_empty()
             && let Some(next) = Command_::build(tokenstream)
         {
-            let pipe = Pipe_ {
+            let pipe = Pipe {
                 to: next.into(),
-                connections: alloc::vec![(STDOUT_FILENO, STDIN_FILENO)],
+                connections,
             };
             zelf.chained = Some(pipe);
         }
@@ -100,131 +121,140 @@ impl<'a> Command_<'a> {
     }
 
     pub fn execute_all(&self) -> SysCallRes<ExecutionContext> {
-        let ctx = ExecutionContext {
-            running: Vec::new(),
-        };
-
-        // for each process:
-        // 1: open files for redir and pipe and dup
-        // 2: execute
-        // 3: cleanup fds -> close + restore old
-        // 4: if fail to execute: kill all previous + exit
-        // 5: setup pipe for next process
-        // 6: next ->
-
-        #[derive(Debug)]
-        struct ExecutionContextGuard {
-            ctx: ExecutionContext,
-        }
-
-        impl Drop for ExecutionContextGuard {
-            fn drop(&mut self) {
-                // on good path this ctx will be ctx::Default. We must ensure to mem::take BEFORE drop
-                for tsk in &self.ctx.running {
-                    _ = unsafe { syscalls::kill(*tsk, -1) }.inspect_err(|e| serial_println!(
-                        "\x1b[31m[SHELL ERR]\x1b[0m could not kill task {} during job spawn cleanup due to: {:?}"
-                        ,tsk ,e
-                    ));
-                }
-            }
-        }
-
-        let mut cleanup = FdCleanup::new();
-        let mut exec_guard = ExecutionContextGuard { ctx };
-
+        let mut ctx = ExecutionContext::default();
         let mut current = self;
+        let mut current_builder = FDActionBuilder::new().add_clear();
+        let mut next_builder = FDActionBuilder::new().add_clear();
 
-        loop {
-            exec_guard.ctx.running.push(current.execute_one()?);
-            // we could call cleanup.cleanup() now to clean the fd table, but this can also be delayed, as we cleanup in reverse
+        let mut should_close = Vec::new();
 
-            if let Some(pipe) = &current.chained {
-                for (from, to) in &pipe.connections {
-                    cleanup.old_fds.push(FDSave {
-                        saved_in: unsafe { syscalls::dup(*to, None) }?,
-                        from: *to,
-                    });
-                    unsafe { syscalls::dup(*from, Some(*to)) }?;
+        // for each pipe:
+        // open pipe in self
+        // close reader in current task (and dup writer to correct fd)
+        // close writer in next task (and dup reader to correct fd)
+        // close both in self after spawning next
+        while let Some(pipe) = &current.chained {
+            for (from, to) in &pipe.connections {
+                let mut pipe_fds = [0_u32, 0_u32];
+                unsafe { syscalls::pipe(&mut pipe_fds as *mut [u32; 2], -1) }?;
+
+                should_close.extend(pipe_fds.iter().map(|fd| OpenFd(*fd)));
+                current_builder = current_builder.add_inherit(pipe_fds[1], *from);
+
+                for to in to {
+                    next_builder = next_builder.add_inherit(pipe_fds[0], *to);
                 }
-                current = pipe.to.as_ref();
-            } else {
-                break;
             }
+
+            ctx.running.push(
+                current.execute_one(core::mem::take(&mut current_builder), &mut should_close)?,
+            );
+
+            (current_builder, next_builder, current) = (
+                next_builder,
+                FDActionBuilder::default().add_clear(),
+                pipe.to.as_ref(),
+            );
         }
 
-        // drop after mem::take, as we do not want to kill good jobs
-        let ctx = core::mem::take(&mut exec_guard.ctx);
+        ctx.running
+            .push(current.execute_one(core::mem::take(&mut current_builder), &mut should_close)?);
+
         Ok(ctx)
     }
 
-    fn execute_one(&self) -> SysCallRes<u64> {
-        // setup redirections
-        // spawn task
-        // cleanup redirections
-
-        let _redir_guards = self
-            .redirections
-            .iter()
-            .map(|redir| redir.install())
-            .rev()
-            .collect::<SysCallRes<Vec<_>>>()?;
+    pub fn execute_one(
+        &self,
+        mut action_builder: FDActionBuilder<'a>,
+        temp_fds: &mut Vec<OpenFd>,
+    ) -> SysCallRes<u64> {
+        for redir in &self.redirections {
+            let (builder, temp_fd) = redir.add_to(action_builder)?;
+            action_builder = builder;
+            temp_fds.push(temp_fd);
+        }
 
         let args = self.args.join(" ");
+        let args = args.as_bytes();
 
         unsafe {
-            syscalls::execve(
+            syscalls::spawn_process(
                 self.bin.as_ptr(),
                 self.bin.len(),
-                args.as_ptr(),
                 args.len(),
-                null(),
+                args.as_ptr(),
                 0,
+                null(),
+                action_builder.ptr().as_ptr(),
+                action_builder.actions.len(),
             )
         }
     }
 }
 
-#[must_use]
-#[derive(Default, Debug)]
-struct FdCleanup {
-    old_fds: Vec<FDSave>,
+#[derive(Debug, Default)]
+pub struct FDActionBuilder<'a> {
+    actions: Vec<FDAction>,
+    _phantom_life: PhantomData<&'a u8>,
 }
 
-impl FdCleanup {
-    fn cleanup(&mut self) {
-        for save in self.old_fds.drain(..).rev() {
-            save.cleanup();
-        }
-    }
-
+#[allow(dead_code)]
+impl<'a> FDActionBuilder<'a> {
     fn new() -> Self {
         Self {
-            old_fds: Vec::new(),
+            actions: Vec::new(),
+            _phantom_life: PhantomData,
         }
     }
-}
 
-impl Drop for FdCleanup {
-    fn drop(&mut self) {
-        self.cleanup();
+    fn reset(mut self) -> Self {
+        self.actions.clear();
+        self
     }
-}
 
-#[must_use]
-#[derive(Debug)]
-struct CloseGuard {
-    fd: FileDescriptor,
-}
+    fn add_clear(mut self) -> Self {
+        self.actions.clear();
+        self.actions.push(FDAction::Clear);
+        self
+    }
 
-impl Drop for CloseGuard {
-    fn drop(&mut self) {
-        if let Err(e) = unsafe { syscalls::close(self.fd) } {
-            serial_println!(
-                "\x1b[31m[SHELL ERR]\x1b[0m could not close save fd {} during job spawn cleanup due to: {:?}",
-                self.fd,
-                e
-            );
-        }
+    fn add_open(mut self, path: &'a str, flags: OpenOptions, to: FileDescriptor) -> Self {
+        let arr = path.as_bytes();
+        self.actions.push(FDAction::Open(
+            syscalls::FDOpen {
+                path: syscalls::FatPtr {
+                    size: arr.len(),
+                    thin: arr.as_ptr(),
+                },
+                flags,
+            },
+            to,
+        ));
+        self
+    }
+
+    fn add_close(mut self, fd: FileDescriptor) -> Self {
+        self.actions.push(FDAction::Close(fd));
+        self
+    }
+
+    fn add_dup(mut self, from: FileDescriptor, to: FileDescriptor) -> Self {
+        self.actions.push(FDAction::Dup(from, to));
+        self
+    }
+
+    fn add_move(mut self, from: FileDescriptor, to: FileDescriptor) -> Self {
+        self = self.add_dup(from, to);
+        self.add_close(from)
+    }
+
+    fn add_inherit(mut self, from: FileDescriptor, to: FileDescriptor) -> Self {
+        self.actions.push(FDAction::Inherit(from, to));
+        self
+    }
+
+    fn ptr(&'a self) -> &'a [FDAction] {
+        &self.actions
     }
 }
 
@@ -272,64 +302,52 @@ fn consume_next_with_whitespace<'a>(
 }
 
 #[derive(Debug)]
-struct Pipe_<'a> {
-    to: Box<Command_<'a>>,
-    connections: Vec<(FileDescriptor, FileDescriptor)>,
+pub struct OpenFd(FileDescriptor);
+
+impl Drop for OpenFd {
+    fn drop(&mut self) {
+        unsafe {
+            _ = syscalls::close(self.0).inspect_err(|e| {
+                eprintln!(
+                    "\x1b[31m[SHELL ERR]\x1b[0m could not close fd {}, due to {:?}",
+                    self.0, e
+                );
+            })
+        };
+    }
 }
 
 #[derive(Debug)]
-struct Redirection_<'a> {
+struct Pipe<'a> {
+    to: Box<Command_<'a>>,
+    connections: HashMap<FileDescriptor, Vec<FileDescriptor>>,
+}
+
+#[derive(Debug)]
+struct Redirection<'a> {
     fds: Vec<FileDescriptor>,
     mode: RedirectionMode,
     file: &'a str,
 }
 
-impl<'a> Redirection_<'a> {
-    fn install(&self) -> SysCallRes<(CloseGuard, FdCleanup)> {
+impl<'a> Redirection<'a> {
+    fn add_to(
+        &self,
+        mut builder: FDActionBuilder<'a>,
+    ) -> SysCallRes<(FDActionBuilder<'a>, OpenFd)> {
         match self.mode {
             RedirectionMode::Empty => Err(syscalls::SysErrCode::NoErr),
+
             _ => {
-                let mut cleanup = FdCleanup::new();
-                let f = unsafe {
-                    syscalls::open(self.file.as_ptr(), self.file.len(), self.mode.into())
-                }?;
-                let guard = CloseGuard { fd: f };
+                let bytes = self.file.as_bytes();
+                let fd = unsafe { syscalls::open(bytes.as_ptr(), bytes.len(), self.mode.into()) }?;
 
-                for fd in &self.fds {
-                    cleanup.old_fds.push(FDSave {
-                        saved_in: unsafe { syscalls::dup(*fd, None) }?,
-                        from: *fd,
-                    });
-
-                    unsafe { syscalls::dup(guard.fd, Some(*fd)) }?;
+                for to in &self.fds {
+                    builder = builder.add_inherit(fd, *to);
                 }
-
-                Ok((guard, cleanup))
+                Ok((builder, OpenFd(fd)))
             }
         }
-    }
-}
-
-#[derive(Debug)]
-struct FDSave {
-    saved_in: FileDescriptor,
-    from: FileDescriptor,
-}
-
-impl FDSave {
-    fn cleanup(&self) {
-        _ = unsafe { syscalls::dup(self.saved_in, Some(self.from)) }.inspect_err(|e| {
-                        serial_println!(
-                            "\x1b[31m[SHELL ERR]\x1b[0m could not restore fd {} to {} during job spawn cleanup due to: {:?}",
-                            self.saved_in, self.from, e
-                        );
-                    });
-        _ = unsafe { syscalls::close(self.saved_in) }.inspect_err(|e| {
-                        serial_println!(
-                            "\x1b[31m[SHELL ERR]\x1b[0m could not close save fd {} during job spawn cleanup due to: {:?}",
-                            self.saved_in,  e
-                        );
-                    });
     }
 }
 
