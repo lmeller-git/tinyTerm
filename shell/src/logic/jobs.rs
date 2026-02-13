@@ -150,7 +150,7 @@ impl<'a> Command_<'a> {
                 serial_println!("pipe fds: {:?}", pipe_fds);
 
                 should_close.extend(pipe_fds.iter().map(|fd| OpenFd(*fd)));
-                current_builder = current_builder.add_inherit(pipe_fds[1], *to);
+                next_builder = next_builder.add_inherit(pipe_fds[0], *to);
 
                 for from in from {
                     current_builder = current_builder.add_inherit(pipe_fds[1], *from);
@@ -175,6 +175,8 @@ impl<'a> Command_<'a> {
         ctx.running
             .push(current.execute_one(core::mem::take(&mut current_builder), &mut should_close)?);
 
+        serial_println!("closing: {:?}", should_close);
+        drop(should_close);
         Ok(ctx)
     }
 
