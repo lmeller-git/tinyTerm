@@ -291,6 +291,13 @@ impl<'a> Tokenizer_<'a> {
     }
 
     fn parse_num<T: From<u32>>(&mut self) -> Result<T, TokenParseError> {
+        if !self.src[self.cursor..]
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_digit())
+        {
+            return Err(TokenParseError::SrcConsumed);
+        }
         let mut num = 0;
         let mut chars = self.src[self.cursor..].bytes();
         while let Some(c) = chars.next()
@@ -317,7 +324,7 @@ impl<'a> Tokenizer_<'a> {
         err_callback: impl Fn(&mut Tokenizer_) -> Result<(), TokenParseError>,
     ) -> Result<(), TokenParseError> {
         if self.cursor >= self.src.len() - by.len_utf8() {
-            return err_callback(self);
+            err_callback(self)
         } else {
             self.cursor += by.len_utf8();
             Ok(())

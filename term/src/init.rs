@@ -1,7 +1,8 @@
 use core::ptr::null;
 
-use libtinyos::syscalls::{
-    self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
+use libtinyos::{
+    serial_print,
+    syscalls::{self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
 };
 
 #[derive(Debug, Clone)]
@@ -41,9 +42,11 @@ pub fn init(shell: &str, stdout: FileDescriptor) -> (OpenPipes, u64) {
     unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(err_ids[1], Some(STDERR_FILENO)) }.unwrap();
 
+    serial_print!("spawning");
     let shell_id = unsafe {
         syscalls::spawn_process(shell.as_ptr(), shell.len(), 0, null(), 0, null(), null(), 0)
     };
+    serial_print!("spawn done");
 
     unsafe { syscalls::dup(stdout, Some(STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(stdout, Some(STDERR_FILENO)) }.unwrap();

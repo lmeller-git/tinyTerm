@@ -123,8 +123,16 @@ impl<'a> Command_<'a> {
     pub fn execute_all(&self) -> SysCallRes<ExecutionContext> {
         let mut ctx = ExecutionContext::default();
         let mut current = self;
-        let mut current_builder = FDActionBuilder::new().add_clear();
-        let mut next_builder = FDActionBuilder::new().add_clear();
+        let mut current_builder = FDActionBuilder::new()
+            .add_clear()
+            .add_inherit(0, 0)
+            .add_inherit(1, 1)
+            .add_inherit(2, 2);
+        let mut next_builder = FDActionBuilder::new()
+            .add_clear()
+            .add_inherit(0, 0)
+            .add_inherit(1, 1)
+            .add_inherit(2, 2);
 
         let mut should_close = Vec::new();
 
@@ -134,15 +142,18 @@ impl<'a> Command_<'a> {
         // close writer in next task (and dup reader to correct fd)
         // close both in self after spawning next
         while let Some(pipe) = &current.chained {
-            for (from, to) in &pipe.connections {
+            serial_println!("pipe: {:?}", pipe);
+            for (to, from) in &pipe.connections {
                 let mut pipe_fds = [0_u32, 0_u32];
                 unsafe { syscalls::pipe(&mut pipe_fds as *mut [u32; 2], -1) }?;
 
-                should_close.extend(pipe_fds.iter().map(|fd| OpenFd(*fd)));
-                current_builder = current_builder.add_inherit(pipe_fds[1], *from);
+                serial_println!("pipe fds: {:?}", pipe_fds);
 
-                for to in to {
-                    next_builder = next_builder.add_inherit(pipe_fds[0], *to);
+                should_close.extend(pipe_fds.iter().map(|fd| OpenFd(*fd)));
+                current_builder = current_builder.add_inherit(pipe_fds[1], *to);
+
+                for from in from {
+                    current_builder = current_builder.add_inherit(pipe_fds[1], *from);
                 }
             }
 
@@ -152,7 +163,11 @@ impl<'a> Command_<'a> {
 
             (current_builder, next_builder, current) = (
                 next_builder,
-                FDActionBuilder::default().add_clear(),
+                FDActionBuilder::default()
+                    .add_clear()
+                    .add_inherit(0, 0)
+                    .add_inherit(1, 1)
+                    .add_inherit(2, 2),
                 pipe.to.as_ref(),
             );
         }
@@ -168,11 +183,13 @@ impl<'a> Command_<'a> {
         mut action_builder: FDActionBuilder<'a>,
         temp_fds: &mut Vec<OpenFd>,
     ) -> SysCallRes<u64> {
+        serial_println!("redirs: {:?}", self.redirections);
         for redir in &self.redirections {
             let (builder, temp_fd) = redir.add_to(action_builder)?;
             action_builder = builder;
             temp_fds.push(temp_fd);
         }
+        serial_println!("builder: {:?}", action_builder);
 
         let args = self.args.join(" ");
         let args = args.as_bytes();
@@ -353,11 +370,16 @@ impl<'a> Redirection<'a> {
 
 pub fn wait_(ctx: ExecutionContext) -> SysCallRes<()> {
     if let Some(stale) = CURRENT_CTX.lock().replace(ctx.clone()) {
-        serial_println!("there was a sstale ctx. killing it...");
+        serial_println!("there was a stale ctx. killing it...");
         _ = stale.kill_all();
     }
     WE_ARE_FG.store(false, core::sync::atomic::Ordering::Release);
-    ctx.wait_all()
+    let r = ctx.wait_all();
+    if let Some(ctx) = CURRENT_CTX.lock().take() {
+        serial_println!("all tasks in ctx are done, it should be safe to discard");
+        _ = ctx.kill_all();
+    };
+    r
 }
 
 pub fn signal_handler(signal_pipe: FileDescriptor) {
