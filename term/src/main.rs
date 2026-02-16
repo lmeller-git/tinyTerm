@@ -47,6 +47,7 @@ pub extern "C" fn main() -> ! {
     }
     .unwrap();
     unsafe { syscalls::dup(serial, Some(syscalls::STDOUT_FILENO)) }.unwrap();
+    unsafe { syscalls::dup(serial, Some(syscalls::STDERR_FILENO)) }.unwrap();
 
     let drawer = init_drawer();
     let drawer_ref = Box::leak(drawer.into());
@@ -57,7 +58,7 @@ pub extern "C" fn main() -> ! {
 
     let shell = "/ram/bin/tinyShell.out";
 
-    let (pipes, shell_id) = init(shell, serial);
+    let (pipes, shell_id) = init(shell);
 
     println!("spawned shell, hooked to terminal and attached back to serial");
 

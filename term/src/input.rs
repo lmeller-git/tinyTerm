@@ -14,7 +14,7 @@ pub fn input_loop(write_fd: FileDescriptor, signal_fds: PipePair) {
     loop {
         unsafe { syscalls::seek(STDIN_FILENO, 0) }.unwrap();
         let read =
-            unsafe { syscalls::read(STDIN_FILENO, buf.as_mut_ptr(), buf.len(), -1_i64 as usize) }
+            unsafe { syscalls::read(STDIN_FILENO, buf.as_mut_ptr(), buf.len(), -1_isize as usize) }
                 .unwrap() as usize;
         let signals: Vec<u8> = buf[..read]
             .iter()
@@ -28,8 +28,8 @@ pub fn input_loop(write_fd: FileDescriptor, signal_fds: PipePair) {
         if !signals.is_empty() {
             unsafe { syscalls::write(signal_fds.write, signals.as_ptr(), signals.len()) }.unwrap();
         }
-        if unsafe { syscalls::write(write_fd, buf.as_ptr(), read) }.is_err() {
-            eprintln!("error writing to shel input pipe.");
+        if let Err(e) = unsafe { syscalls::write(write_fd, buf.as_ptr(), read) } {
+            eprintln!("error writing to shel input pipe: {:?}", e);
         }
     }
 }

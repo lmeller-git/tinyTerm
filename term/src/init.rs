@@ -2,7 +2,9 @@ use core::ptr::null;
 
 use libtinyos::{
     serial_print,
-    syscalls::{self, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
+    syscalls::{
+        self, FDAction, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -28,9 +30,9 @@ impl From<[u32; 2]> for PipePair {
     }
 }
 
-pub fn init(shell: &str, stdout: FileDescriptor) -> (OpenPipes, u64) {
+pub fn init(shell: &str) -> (OpenPipes, u64) {
     let mut input_ids = [0_u32, 0_u32];
-    unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2], 32) }.unwrap();
+    unsafe { syscalls::pipe(&mut input_ids as *mut [u32; 2], -1) }.unwrap();
     let mut output_ids = [0_u32, 0_u32];
     unsafe { syscalls::pipe(&mut output_ids as *mut [u32; 2], -1) }.unwrap();
     let mut err_ids = [0_u32, 0_u32];
@@ -38,24 +40,38 @@ pub fn init(shell: &str, stdout: FileDescriptor) -> (OpenPipes, u64) {
     let mut signal_ids = [0_u32, 0_u32];
     unsafe { syscalls::pipe(&mut signal_ids as *mut [u32; 2], -1) }.unwrap();
 
-    unsafe { syscalls::dup(input_ids[0], Some(STDIN_FILENO)) }.unwrap();
-    unsafe { syscalls::dup(output_ids[1], Some(STDOUT_FILENO)) }.unwrap();
-    unsafe { syscalls::dup(err_ids[1], Some(STDERR_FILENO)) }.unwrap();
-
-    serial_print!("spawning");
+    let actions = [
+        FDAction::Clear,
+        FDAction::Inherit(input_ids[0], STDIN_FILENO),
+        FDAction::Inherit(output_ids[1], STDOUT_FILENO),
+        FDAction::Inherit(err_ids[1], STDERR_FILENO),
+        FDAction::Inherit(signal_ids[0], signal_ids[0]),
+    ];
     let shell_id = unsafe {
-        syscalls::spawn_process(shell.as_ptr(), shell.len(), 0, null(), 0, null(), null(), 0)
+        syscalls::spawn_process(
+            shell.as_ptr(),
+            shell.len(),
+            0,
+            null(),
+            0,
+            null(),
+            actions.as_ptr(),
+            actions.len(),
+        )
     };
-    serial_print!("spawn done");
 
-    unsafe { syscalls::dup(stdout, Some(STDOUT_FILENO)) }.unwrap();
-    unsafe { syscalls::dup(stdout, Some(STDERR_FILENO)) }.unwrap();
+    _ = unsafe { syscalls::close(input_ids[0]) };
+    _ = unsafe { syscalls::close(output_ids[1]) };
+    _ = unsafe { syscalls::close(err_ids[1]) };
+    _ = unsafe { syscalls::close(signal_ids[0]) };
 
     let shell_id = shell_id.unwrap();
 
     let path = b"/proc/kernel/io/stateful_keyboard";
     let stdin = unsafe { syscalls::open(path.as_ptr(), path.len(), OpenOptions::READ) }.unwrap();
     unsafe { syscalls::dup(stdin, Some(STDIN_FILENO)) }.unwrap();
+    _ = unsafe { syscalls::close(stdin) };
+
     // first we send the fd, which is coupled to signal pipe read end
     unsafe { syscalls::write(input_ids[1], signal_ids[0].to_be_bytes().as_ptr(), 4) }.unwrap();
 
