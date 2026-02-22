@@ -12,6 +12,8 @@ use crate::{
     logic::{SimpleTimeout, jobs::signal_handler, state::ShellState},
 };
 
+mod builtins;
+mod env;
 mod init;
 mod io;
 mod logic;

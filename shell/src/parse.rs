@@ -9,6 +9,8 @@ use regex::Regex;
 
 static PIPE_REGEX: OnceCell<Regex> = OnceCell::uninit();
 
+// TODO add env var parsing
+
 pub struct TokenStream<'a> {
     inner: Vec<Token<'a>>,
 }

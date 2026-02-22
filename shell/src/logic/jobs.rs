@@ -2,7 +2,11 @@ use core::{
     fmt::Display, iter::Peekable, marker::PhantomData, ptr::null, sync::atomic::AtomicBool,
 };
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 use hashbrown::HashMap;
 use libtinyos::{
     eprintln, serial_println,
@@ -10,12 +14,12 @@ use libtinyos::{
         self, FDAction, FileDescriptor, OpenOptions, SysCallRes, TaskWaitOptions, WaitOptions,
     },
 };
-use spin::Mutex;
 
-use crate::parse::{self, RedirectionMode, Token};
-
-pub static WE_ARE_FG: AtomicBool = AtomicBool::new(false);
-pub static CURRENT_CTX: Mutex<Option<ExecutionContext>> = Mutex::new(None);
+use crate::{
+    builtins,
+    env::get_env,
+    parse::{self, RedirectionMode, Token},
+};
 
 #[derive(Debug)]
 pub struct Command_<'a> {
@@ -136,6 +140,8 @@ impl<'a> Command_<'a> {
 
         let mut should_close = Vec::new();
 
+        let env = get_env().env();
+
         // for each pipe:
         // open pipe in self
         // close reader in current task (and dup writer to correct fd)
@@ -157,9 +163,13 @@ impl<'a> Command_<'a> {
                 }
             }
 
-            ctx.running.push(
-                current.execute_one(core::mem::take(&mut current_builder), &mut should_close)?,
-            );
+            if let Some(res) = current.execute_one(
+                core::mem::take(&mut current_builder),
+                &mut should_close,
+                &env,
+            ) {
+                ctx.running.push(res?);
+            }
 
             (current_builder, next_builder, current) = (
                 next_builder,
@@ -172,8 +182,13 @@ impl<'a> Command_<'a> {
             );
         }
 
-        ctx.running
-            .push(current.execute_one(core::mem::take(&mut current_builder), &mut should_close)?);
+        if let Some(res) = current.execute_one(
+            core::mem::take(&mut current_builder),
+            &mut should_close,
+            &env,
+        ) {
+            ctx.running.push(res?);
+        }
 
         serial_println!("closing: {:?}", should_close);
         drop(should_close);
@@ -184,10 +199,14 @@ impl<'a> Command_<'a> {
         &self,
         mut action_builder: FDActionBuilder<'a>,
         temp_fds: &mut Vec<OpenFd>,
-    ) -> SysCallRes<u64> {
+        env: &str,
+    ) -> Option<SysCallRes<u64>> {
         serial_println!("redirs: {:?}", self.redirections);
         for redir in &self.redirections {
-            let (builder, temp_fd) = redir.add_to(action_builder)?;
+            let (builder, temp_fd) = match redir.add_to(action_builder) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
             action_builder = builder;
             temp_fds.push(temp_fd);
         }
@@ -196,19 +215,68 @@ impl<'a> Command_<'a> {
         let args = self.args.join(" ");
         let args = args.as_bytes();
 
-        unsafe {
+        if builtins::dispatch(
+            self.bin,
+            str::from_utf8(args).ok().unwrap_or(""),
+            env,
+            &action_builder,
+        )
+        .is_ok()
+        {
+            return None;
+        }
+
+        let vars = get_env().vars();
+
+        let cwd = vars.get("CWD").unwrap_or("/");
+
+        let bin = if let Some(bin) = resolve_relative(cwd, self.bin) {
+            bin
+        } else {
+            self.bin.to_string()
+        };
+
+        serial_println!("bin is {}", bin);
+
+        Some(unsafe {
             syscalls::spawn_process(
-                self.bin.as_ptr(),
-                self.bin.len(),
+                bin.as_ptr(),
+                bin.len(),
                 args.len(),
                 args.as_ptr(),
-                0,
-                null(),
+                env.len(),
+                env.as_ptr(),
                 action_builder.ptr().as_ptr(),
                 action_builder.actions.len(),
             )
+        })
+    }
+}
+
+fn resolve_relative(root: &str, append: &str) -> Option<String> {
+    if append.starts_with('/') {
+        return None;
+    }
+
+    let mut root = root.to_string();
+    if root.ends_with('/') {
+        root.pop();
+    }
+    let segments = append
+        .split('/')
+        .filter(|&segment| !segment.is_empty() && segment != ".");
+    for segment in segments {
+        if segment == ".." {
+            if let Some((r, _)) = root.rsplit_once('/') {
+                root.truncate(r.len());
+            }
+        } else {
+            root.push('/');
+            root.push_str(segment);
         }
     }
+
+    Some(root)
 }
 
 #[derive(Debug, Default)]
@@ -371,21 +439,17 @@ impl<'a> Redirection<'a> {
 }
 
 pub fn wait_(ctx: ExecutionContext) -> SysCallRes<()> {
-    if let Some(stale) = CURRENT_CTX.lock().replace(ctx.clone()) {
-        serial_println!("there was a stale ctx. killing it...");
-        _ = stale.kill_all();
-    }
-    WE_ARE_FG.store(false, core::sync::atomic::Ordering::Release);
+    let env = get_env();
+    env.set_ctx(ctx.clone());
+    env.set_bg();
     let r = ctx.wait_all();
-    if let Some(ctx) = CURRENT_CTX.lock().take() {
-        serial_println!("all tasks in ctx are done, it should be safe to discard");
-        _ = ctx.kill_all();
-    };
+    env.clear_ctx();
     r
 }
 
 pub fn signal_handler(signal_pipe: FileDescriptor) {
     let mut buffer = [0_u8; 10];
+    let env = get_env();
     loop {
         let n_read = unsafe {
             syscalls::read(
@@ -400,11 +464,11 @@ pub fn signal_handler(signal_pipe: FileDescriptor) {
         for signal in signals {
             match signal {
                 0 => {
-                    if !WE_ARE_FG.load(core::sync::atomic::Ordering::Acquire)
-                        && let Some(ctx) = CURRENT_CTX.lock().take()
+                    if !env.is_fg()
+                        && let Some(_) = env.get_ctx()
                     {
-                        _ = ctx.kill_all();
-                        WE_ARE_FG.store(true, core::sync::atomic::Ordering::Release);
+                        env.clear_ctx();
+                        env.set_fg();
                     }
                     serial_println!("[signal abort]")
                 }

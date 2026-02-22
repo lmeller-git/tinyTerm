@@ -7,6 +7,7 @@ use vte::ansi::Handler;
 
 use crate::{
     drain_stdin,
+    env::get_env,
     logic::jobs::{Command_, wait_},
     parse::Tokenizer_,
 };
@@ -42,7 +43,7 @@ impl ShellState {
     }
 
     fn inject_prompt(&mut self) {
-        println!("tinyos:/");
+        println!("tinyos:{}", get_env().vars().get("CWD").unwrap_or("/"));
         print!("\r{}", PROMPT);
         self.input_buf.extend(PROMPT.chars());
         self.inc_cursor(PROMPT.chars().count());
