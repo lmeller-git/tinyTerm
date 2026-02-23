@@ -1,6 +1,6 @@
 OUTPUT_FORMAT(elf64-x86-64)
 
-ENTRY(main)
+ENTRY(_start)
 
 PHDRS
 {
@@ -12,7 +12,7 @@ PHDRS
 SECTIONS
 {
     . = 0x400000;
-    
+
     .text : {
         *(.text .text.*)
     } :text
@@ -32,11 +32,11 @@ SECTIONS
     } :data
 
     . = ALIGN(4096);
-    
+
     .bss : {
       *(.bss .bss.*)
     } :data
-    
+
     /DISCARD/ : {
         *(.note .note.*)
         *(.note.GNU-stack)

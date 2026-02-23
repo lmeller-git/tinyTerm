@@ -20,7 +20,7 @@ mod logic;
 pub mod parse;
 
 #[unsafe(no_mangle)]
-extern "C" fn main() {
+fn main() {
     let signal_fd = init();
 
     thread::spawn(move || signal_handler(signal_fd)).unwrap();

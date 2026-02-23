@@ -36,7 +36,7 @@ pub mod state;
 // stin, stdout, stder, ... communicate with the state thread via commands, which get executed async
 
 #[unsafe(no_mangle)]
-pub extern "C" fn main() -> ! {
+pub fn main() {
     let path = "/proc/kernel/io/serial";
     let serial = unsafe {
         syscalls::open(
@@ -76,7 +76,6 @@ pub extern "C" fn main() -> ! {
     println!("background threads started up, we will now handle the shells in and output");
     event_loop(term, _event_queue);
     eprintln!("Shutting down terminal...");
-    unsafe { syscalls::exit(0) }
 }
 
 fn event_loop<B: Backend>(mut term: TermState<B>, event_queue: Arc<SegQueue<EventPacket>>) {
