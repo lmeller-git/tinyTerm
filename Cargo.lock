@@ -480,7 +480,7 @@ checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
 [[package]]
 name = "libtinyos"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#8f8b64cc584f7c72e6bf632b49392edcf30e067f"
+source = "git+https://github.com/lmeller-git/libtinyos#6482b7fb0f3fe391a8bd688878df1e2a42a8a2ca"
 dependencies = [
  "bitflags",
  "cbindgen",
@@ -936,7 +936,7 @@ dependencies = [
 [[package]]
 name = "tinygraphics"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#8f8b64cc584f7c72e6bf632b49392edcf30e067f"
+source = "git+https://github.com/lmeller-git/libtinyos#6482b7fb0f3fe391a8bd688878df1e2a42a8a2ca"
 dependencies = [
  "cbindgen",
  "conquer-once",
