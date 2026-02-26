@@ -1,6 +1,4 @@
-use core::{
-    fmt::Display, iter::Peekable, marker::PhantomData, ptr::null, sync::atomic::AtomicBool,
-};
+use core::{fmt::Display, iter::Peekable, marker::PhantomData};
 
 use alloc::{
     boxed::Box,
@@ -17,7 +15,7 @@ use libtinyos::{
 
 use crate::{
     builtins,
-    env::get_env,
+    env::{EnvVarStack, get_env},
     parse::{self, RedirectionMode, Token},
 };
 
@@ -27,6 +25,7 @@ pub struct Command_<'a> {
     args: Vec<&'a str>,
     redirections: Vec<Redirection<'a>>,
     chained: Option<Pipe<'a>>,
+    active_env_var_stack: EnvVarStack,
 }
 
 impl Display for Command_<'_> {
@@ -43,8 +42,26 @@ impl Display for Command_<'_> {
 impl<'a> Command_<'a> {
     pub fn build(tokenstream: &mut Peekable<impl Iterator<Item = Token<'a>>>) -> Option<Self> {
         // prompt for a single job looks like
-        // <bin> <args> <redirs> <pipe>
+        // <env vars> <bin> <args> <redirs> <pipe>
         // we ignore all whitespace
+        let mut env = EnvVarStack::new();
+        collect_all(tokenstream, &mut |token| {
+            match token {
+                // TODO
+                // there might be vars containing an eq in their value, ie VAR="x=y". Should check if we are in some quoted region and split only non quoted regions i guess
+                Token::Literal(lit)
+                    if let Some(mut split) = Some(lit.split('='))
+                        && let (Some(key), Some(val), None) =
+                            (split.next(), split.next(), split.next()) =>
+                {
+                    _ = env.add(key.into(), val.into());
+                }
+                Token::WhiteSpace(_) => {}
+                _ => return false,
+            }
+            true
+        });
+
         let Token::Literal(bin) = consume_next_with_whitespace(tokenstream)? else {
             return None;
         };
@@ -91,6 +108,7 @@ impl<'a> Command_<'a> {
             args,
             redirections,
             chained: None,
+            active_env_var_stack: env,
         };
 
         let mut connections = HashMap::new();
@@ -140,7 +158,7 @@ impl<'a> Command_<'a> {
 
         let mut should_close = Vec::new();
 
-        let env = get_env().env();
+        let env = EnvVarStack::joined_as_env(&get_env().vars(), &self.active_env_var_stack);
 
         // for each pipe:
         // open pipe in self

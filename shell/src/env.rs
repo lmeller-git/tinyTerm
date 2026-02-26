@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32};
 
 use alloc::string::String;
 use conquer_once::spin::OnceCell;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use libtinyos::{
     serial_println,
     syscalls::{self, FileDescriptor, OpenOptions, SysCallRes},
@@ -42,6 +42,16 @@ impl EnvVarStack {
 
     pub fn get(&self, v: &str) -> Option<&str> {
         self.temp.get(v).map(|v| v.as_str())
+    }
+
+    /// builds an env using entries from both stacks, with entries in stack two having priority
+    pub fn joined_as_env(one: &EnvVarStack, two: &EnvVarStack) -> String {
+        one.temp
+            .iter()
+            .filter(|(k, _)| two.get(k).is_some())
+            .flat_map(|(k, v)| [k, "=", v, "\0"])
+            .chain(two.temp.iter().flat_map(|(k, v)| [k, "=", v, "\0"]))
+            .collect()
     }
 }
 
