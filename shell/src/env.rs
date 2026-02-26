@@ -48,7 +48,7 @@ impl EnvVarStack {
     pub fn joined_as_env(one: &EnvVarStack, two: &EnvVarStack) -> String {
         one.temp
             .iter()
-            .filter(|(k, _)| two.get(k).is_some())
+            .filter(|(k, _)| two.get(k).is_none())
             .flat_map(|(k, v)| [k, "=", v, "\0"])
             .chain(two.temp.iter().flat_map(|(k, v)| [k, "=", v, "\0"]))
             .collect()
