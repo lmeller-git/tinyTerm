@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32};
 
 use alloc::string::String;
 use conquer_once::spin::OnceCell;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use libtinyos::{
     serial_println,
     syscalls::{self, FileDescriptor, OpenOptions, SysCallRes},
@@ -29,6 +29,7 @@ impl EnvVarStack {
         }
     }
 
+    #[allow(dead_code)]
     pub fn env(&self) -> String {
         self.temp
             .iter()
@@ -74,13 +75,13 @@ impl EnvBuilder {
         let mut vars = self.inner.vars.write();
         vars.temp.insert("PATH".into(), ".:/ram/bin".into());
         drop(vars);
-        self.inner.update_cwd("/".into());
+        _ = self.inner.update_cwd("/".into());
         self
     }
 
-    pub fn add_file_conf(mut self, f: String) -> Self {
-        // TODO
-        self
+    #[allow(dead_code)]
+    pub fn add_file_conf(self, _f: String) -> Self {
+        todo!()
     }
 }
 
@@ -103,7 +104,7 @@ impl StaticEnv {
 
     pub fn cwd(&self) -> Option<FileDescriptor> {
         let fd = self.open_wd.load(core::sync::atomic::Ordering::Acquire);
-        (fd != 0).then(|| fd)
+        (fd != 0).then_some(fd)
     }
 
     pub fn update_cwd(&self, p: String) -> SysCallRes<()> {
@@ -125,10 +126,12 @@ impl StaticEnv {
         self.vars.read()
     }
 
+    #[allow(dead_code)]
     pub fn vars_mut(&self) -> RwLockWriteGuard<'_, EnvVarStack> {
         self.vars.write()
     }
 
+    #[allow(dead_code)]
     pub fn env(&self) -> String {
         self.vars.read().env()
     }
@@ -147,6 +150,7 @@ impl StaticEnv {
             .store(true, core::sync::atomic::Ordering::Release);
     }
 
+    #[allow(dead_code)]
     pub fn exec_ctx(&self) -> &Mutex<Option<ExecutionContext>> {
         &self.active_exec_ctx
     }

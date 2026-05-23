@@ -10,6 +10,5 @@ pub fn init() -> FileDescriptor {
     let mut signal_fd_buf = [0_u8; 4];
     while unsafe { syscalls::read(STDIN_FILENO, signal_fd_buf.as_mut_ptr(), 4, 0) }.unwrap() == 0 {}
 
-    let signal_fd = u32::from_be_bytes(signal_fd_buf);
-    signal_fd
+    u32::from_be_bytes(signal_fd_buf)
 }

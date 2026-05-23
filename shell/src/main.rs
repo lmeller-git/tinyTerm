@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(if_let_guard)]
 
 extern crate alloc;
 use libtinyos::thread;

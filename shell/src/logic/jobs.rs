@@ -1,13 +1,16 @@
 use core::{fmt::Display, iter::Peekable, marker::PhantomData};
 
 use alloc::{
+    borrow::ToOwned,
     boxed::Box,
     string::{String, ToString},
     vec::Vec,
 };
 use hashbrown::HashMap;
 use libtinyos::{
-    eprintln, serial_println,
+    eprintln,
+    path::{Path, PathBuf},
+    serial_println,
     syscalls::{
         self, FDAction, FileDescriptor, OpenOptions, SysCallRes, TaskWaitOptions, WaitOptions,
     },
@@ -23,7 +26,7 @@ use crate::{
 pub struct Command_<'a> {
     bin: &'a str,
     args: Vec<&'a str>,
-    redirections: Vec<Redirection<'a>>,
+    redirections: Vec<Redirection>,
     chained: Option<Pipe<'a>>,
     active_env_var_stack: EnvVarStack,
 }
@@ -79,14 +82,26 @@ impl<'a> Command_<'a> {
         let mut redirections = Vec::new();
         let mut current_redir: Option<parse::Redirection> = None;
 
+        let env_vars_ref = get_env().vars();
+
+        let cwd = Path::new(
+            &env.get("CWD")
+                .or_else(|| env_vars_ref.get("CWD"))
+                .unwrap_or_default(),
+        )
+        .to_owned();
+
         while let Some(next) = tokenstream.peek() {
             match next {
                 Token::Literal(lit) => {
                     if let Some(current) = current_redir.take() {
+                        let mut path = cwd.clone().join(lit);
+                        path.canonicalize();
+
                         redirections.push(Redirection {
                             fds: current.from,
                             mode: current.mode,
-                            file: lit,
+                            file: path,
                         });
                     } else {
                         break;
@@ -429,14 +444,14 @@ struct Pipe<'a> {
 }
 
 #[derive(Debug)]
-struct Redirection<'a> {
+struct Redirection {
     fds: Vec<FileDescriptor>,
     mode: RedirectionMode,
-    file: &'a str,
+    file: PathBuf,
 }
 
-impl<'a> Redirection<'a> {
-    fn add_to(
+impl Redirection {
+    fn add_to<'a>(
         &self,
         mut builder: FDActionBuilder<'a>,
     ) -> SysCallRes<(FDActionBuilder<'a>, OpenFd)> {
@@ -444,7 +459,7 @@ impl<'a> Redirection<'a> {
             RedirectionMode::Empty => Err(syscalls::SysErrCode::NoErr),
 
             _ => {
-                let bytes = self.file.as_bytes();
+                let bytes = self.file.as_str().as_bytes();
                 let fd = unsafe { syscalls::open(bytes.as_ptr(), bytes.len(), self.mode.into()) }?;
 
                 for to in &self.fds {

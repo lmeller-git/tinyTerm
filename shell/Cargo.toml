@@ -18,8 +18,8 @@ regex = { version = "1.12.2", default-features = false, features = ["unicode-per
 conquer-once = { version = "0.4.0", default-features = false }
 hashbrown = { version = "0.15.4"}
 
-[profile.dev]
-panic = "abort"
+# [profile.dev]
+# panic = "abort"
 
-[profile.release]
-panic = "abort"
+# [profile.release]
+# panic = "abort"

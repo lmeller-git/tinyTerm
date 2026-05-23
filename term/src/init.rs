@@ -1,10 +1,7 @@
 use core::ptr::null;
 
-use libtinyos::{
-    serial_print,
-    syscalls::{
-        self, FDAction, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
-    },
+use libtinyos::syscalls::{
+    self, FDAction, FileDescriptor, OpenOptions, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
 };
 
 #[derive(Debug, Clone)]
