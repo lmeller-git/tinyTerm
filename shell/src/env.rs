@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, AtomicU32};
 
-use alloc::string::String;
+use alloc::{str, string::String};
 use conquer_once::spin::OnceCell;
 use hashbrown::HashMap;
 use libtinyos::{
@@ -102,6 +102,7 @@ impl StaticEnv {
         }
     }
 
+    #[allow(dead_code)]
     pub fn cwd(&self) -> Option<FileDescriptor> {
         let fd = self.open_wd.load(core::sync::atomic::Ordering::Acquire);
         (fd != 0).then_some(fd)
