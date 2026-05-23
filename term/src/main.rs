@@ -39,14 +39,8 @@ pub mod state;
 #[unsafe(no_mangle)]
 pub fn main() -> Result<(), ProcessError> {
     let path = "/proc/kernel/io/serial";
-    let serial = unsafe {
-        syscalls::open(
-            path.as_ptr(),
-            path.bytes().len(),
-            syscalls::OpenOptions::WRITE,
-        )
-    }
-    .unwrap();
+    let serial =
+        unsafe { syscalls::open(path.as_ptr(), path.len(), syscalls::OpenOptions::WRITE) }.unwrap();
     unsafe { syscalls::dup(serial, Some(syscalls::STDOUT_FILENO)) }.unwrap();
     unsafe { syscalls::dup(serial, Some(syscalls::STDERR_FILENO)) }.unwrap();
 

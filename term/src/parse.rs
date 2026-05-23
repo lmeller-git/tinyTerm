@@ -45,20 +45,20 @@ impl Config {
 
     // TODO this hopusl only parse once for all calls per cycle
     fn parse_item(&self, name: &str) -> Option<Color> {
-        let mut buf = [0; DEFAULT_CONF.len() + 10];
+        unsafe { syscalls::seek(self.config_file, 0) }.ok()?;
+        let mut buf = [0; DEFAULT_CONF.len() * 2];
         if let Ok(n) = unsafe { syscalls::read(self.config_file, buf.as_mut_ptr(), buf.len(), 0) }
             && n > 0
             && let Ok(values) = str::from_utf8(&buf[..n as usize])
         {
             values
-                .split('\t')
+                .split(' ')
                 .filter_map(|config_line| {
                     if config_line.starts_with(name) {
                         config_line
-                            .split(' ')
-                            .last()
-                            .map(|color_str| Color::from_str(color_str).ok())
-                            .flatten()
+                            .split(':')
+                            .next_back()
+                            .and_then(|color_str| Color::from_str(color_str).ok())
                     } else {
                         None
                     }
@@ -67,5 +67,11 @@ impl Config {
         } else {
             None
         }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
     }
 }

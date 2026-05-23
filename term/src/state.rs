@@ -87,6 +87,7 @@ impl BufferLine {
         self.inner.pop()
     }
 
+    #[allow(clippy::inherent_to_string)]
     fn to_string(&self) -> String {
         let mut s = String::with_capacity(self.len());
         for c in self.inner.iter() {
@@ -204,7 +205,7 @@ impl<B: Backend> EventHandler for TermState<B> {
         for event in &events.events {
             match event {
                 Event::CharStream(v) => {
-                    let stream = v.iter().map(|c| c).collect::<String>();
+                    let stream = v.iter().collect::<String>();
                     self.parse_stream(&mut parser, stream.as_bytes());
                 }
                 Event::ByteStream(bytes) => self.parse_stream(&mut parser, bytes),

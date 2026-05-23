@@ -93,7 +93,7 @@ impl<'a> Command_<'a> {
                     }
                 }
                 Token::Redirection(redir) => {
-                    if let Some(_) = current_redir.replace(redir.clone()) {
+                    if current_redir.replace(redir.clone()).is_some() {
                         return None;
                     }
                 }
