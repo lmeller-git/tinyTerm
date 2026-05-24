@@ -2,6 +2,7 @@
 #![no_main]
 
 extern crate alloc;
+use libtinyos::serial_println;
 use libtinyos::thread;
 
 use libtinyos::syscalls;
@@ -21,14 +22,21 @@ pub mod parse;
 
 #[unsafe(no_mangle)]
 fn main() {
+    serial_println!("prepre starytup");
     let signal_fd = init();
+    serial_println!("post init starytup");
 
     thread::spawn(move || signal_handler(signal_fd)).unwrap();
 
     let mut buf = [0; 64];
+    serial_println!("pre starytup");
     let mut handle = ShellState::new();
     let mut parser = Processor::<SimpleTimeout>::new();
+
+    serial_println!("spawned up shell");
     drain_stdin();
+
+    serial_println!("entering main loop");
 
     loop {
         let res = unsafe {
