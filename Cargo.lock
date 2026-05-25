@@ -486,7 +486,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 [[package]]
 name = "libtinyos"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#5da1d6a9d220983c832644f5883f92ab014143bd"
+source = "git+https://github.com/lmeller-git/libtinyos#7456ebf22e8c59fcc9036f37ad160b265bdc1fe6"
 dependencies = [
  "bitflags",
  "cbindgen",
@@ -532,9 +532,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.29"
+version = "0.4.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+checksum = "616ec5685824bcc94416c6d4a7a446eea774a31efd7062c8480ba6fd06d7a6e5"
 
 [[package]]
 name = "lru"
@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "tinygraphics"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/libtinyos#5da1d6a9d220983c832644f5883f92ab014143bd"
+source = "git+https://github.com/lmeller-git/libtinyos#7456ebf22e8c59fcc9036f37ad160b265bdc1fe6"
 dependencies = [
  "cbindgen",
  "conquer-once",
@@ -955,7 +955,7 @@ dependencies = [
 [[package]]
 name = "tinyos_abi"
 version = "0.1.0"
-source = "git+https://github.com/lmeller-git/tinyOS#bbf3fb829fe1351c6ceecd012688cfc7209a972e"
+source = "git+https://github.com/lmeller-git/tinyOS#7a3a1c69c65b75c8b00055e7c4381c5f687078db"
 dependencies = [
  "bitflags",
  "x86_64",

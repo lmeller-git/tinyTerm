@@ -5,7 +5,7 @@ use conquer_once::spin::OnceCell;
 use hashbrown::HashMap;
 use libtinyos::{
     serial_println,
-    syscalls::{self, FileDescriptor, OpenOptions, SysCallRes},
+    syscalls::{self, FStat, FileDescriptor, NodeType, OpenOptions, SysCallRes},
 };
 use spin::{Mutex, RwLock, RwLockReadGuard, rwlock::RwLockWriteGuard};
 
@@ -112,11 +112,18 @@ impl StaticEnv {
         let mut writer = self.vars.write();
         let cwd_fd = unsafe { syscalls::open(p.as_ptr(), p.len(), OpenOptions::READ) }?;
 
+        let mut stat_buf = FStat::default();
+        unsafe { syscalls::fstat(cwd_fd, &mut stat_buf as *mut FStat) }?;
+
+        if stat_buf.node_type != NodeType::DIR {
+            return unsafe { syscalls::close(cwd_fd) };
+        }
+
         let old = self
             .open_wd
             .swap(cwd_fd, core::sync::atomic::Ordering::AcqRel);
         if old != 0 && old != cwd_fd {
-            _ = unsafe { syscalls::close(old) };
+            unsafe { syscalls::close(old) }?;
         }
 
         writer.temp.insert("CWD".into(), p);
