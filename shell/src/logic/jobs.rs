@@ -12,7 +12,8 @@ use libtinyos::{
     path::{Path, PathBuf},
     serial_println,
     syscalls::{
-        self, FDAction, FileDescriptor, OpenOptions, SysCallRes, TaskWaitOptions, WaitOptions,
+        self, FDAction, FileDescriptor, OpenOptions, SysCallRes, TaskStateChange, TaskWaitOptions,
+        WaitOptions,
     },
 };
 
@@ -173,7 +174,7 @@ impl<'a> Command_<'a> {
 
         let mut should_close = Vec::new();
 
-        let env = EnvVarStack::joined_as_env(&get_env().vars(), &self.active_env_var_stack);
+        let env = EnvVarStack::joined(&get_env().vars(), &self.active_env_var_stack);
 
         // for each pipe:
         // open pipe in self
@@ -232,7 +233,7 @@ impl<'a> Command_<'a> {
         &self,
         mut action_builder: FDActionBuilder<'a>,
         temp_fds: &mut Vec<OpenFd>,
-        env: &str,
+        env: &EnvVarStack,
     ) -> Option<SysCallRes<u64>> {
         serial_println!("redirs: {:?}", self.redirections);
         for redir in &self.redirections {
@@ -246,39 +247,106 @@ impl<'a> Command_<'a> {
         serial_println!("builder: {:?}", action_builder);
 
         let args = self.args.join(" ");
-        let args = args.as_bytes();
+        let env_str = env.env();
 
-        if builtins::dispatch(
-            self.bin,
-            str::from_utf8(args).ok().unwrap_or(""),
-            env,
-            &action_builder,
-        )
-        .is_ok()
-        {
+        if builtins::dispatch(self.bin, &args, &env_str, &action_builder).is_ok() {
             return None;
         }
 
-        let vars = get_env().vars();
+        let args = args.as_bytes();
 
-        let cwd = vars.get("CWD").unwrap_or("/");
-
-        let bin = if let Some(bin) = resolve_relative(cwd, self.bin) {
+        let bin = if let Some(bin) = resolve_relative(env.get("CWD").unwrap_or_default(), self.bin)
+        {
             bin
         } else {
             self.bin.to_string()
         };
 
-        serial_println!("bin is {}", bin);
+        let mut bin_bytes = bin.into_bytes();
+
+        // check whether bin is on PATH if its not absolute
+
+        if !is_canonical(&bin_bytes) {
+            let current_builder = FDActionBuilder::new()
+                .add_clear()
+                .add_inherit(0, 0)
+                .add_inherit(1, 1)
+                .add_inherit(2, 2);
+
+            let mut pipe_fds = [0_u32, 0_u32];
+            unsafe { syscalls::pipe(&mut pipe_fds as *mut [u32; 2], -1) }.ok()?;
+            let current_builder = current_builder.add_inherit(pipe_fds[1], pipe_fds[1]);
+
+            let mut buf_reader = [0; 32];
+            let mut data = Vec::new();
+
+            'path: for path in env.get("PATH").unwrap_or_default().split(':') {
+                // just spawn ls cuz im lazy
+                if let Ok(pid) = unsafe {
+                    syscalls::spawn_process(
+                        "/ram/bin/ls".as_ptr(),
+                        "/ram/bin/ls".len(),
+                        1,
+                        path.as_ptr(),
+                        env_str.len(),
+                        env_str.as_ptr(),
+                        current_builder.ptr().as_ptr(),
+                        current_builder.actions.len(),
+                    )
+                } {
+                    loop {
+                        let state = unsafe {
+                            syscalls::wait_pid(
+                                pid,
+                                -1,
+                                WaitOptions::empty(),
+                                TaskWaitOptions::empty(),
+                            )
+                        };
+                        if let Ok(s) = state
+                            && matches!(s, TaskStateChange::EXIT)
+                        {
+                            break;
+                        } else if state.is_err() {
+                            continue 'path;
+                        }
+                    }
+
+                    while let Ok(n) = unsafe {
+                        syscalls::read(
+                            pipe_fds[0],
+                            buf_reader.as_mut_ptr(),
+                            buf_reader.len(),
+                            -1_isize as usize,
+                        )
+                    } && n > 0
+                    {
+                        data.extend_from_slice(&buf_reader[..n as usize]);
+                    }
+
+                    for component in data.split(|c| *c == b'\t') {
+                        if let Some(suffix) = component.strip_prefix(bin_bytes.as_slice())
+                            && (suffix.is_empty() || suffix.starts_with(b"/"))
+                        {
+                            // we found a matching item on PATH
+                            bin_bytes = component.to_vec();
+                            break 'path;
+                        }
+                    }
+                }
+            }
+        }
+
+        serial_println!("bin is {}", String::from_utf8(bin_bytes.clone()).unwrap());
 
         Some(unsafe {
             syscalls::spawn_process(
-                bin.as_ptr(),
-                bin.len(),
+                bin_bytes.as_ptr(),
+                bin_bytes.len(),
                 args.len(),
                 args.as_ptr(),
-                env.len(),
-                env.as_ptr(),
+                env_str.len(),
+                env_str.as_ptr(),
                 action_builder.ptr().as_ptr(),
                 action_builder.actions.len(),
             )
@@ -286,8 +354,12 @@ impl<'a> Command_<'a> {
     }
 }
 
+fn is_canonical(path: &[u8]) -> bool {
+    path.starts_with(b"/")
+}
+
 fn resolve_relative(root: &str, append: &str) -> Option<String> {
-    if append.starts_with('/') {
+    if !(append.starts_with('.') || append.starts_with("..")) {
         return None;
     }
 

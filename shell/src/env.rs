@@ -54,6 +54,13 @@ impl EnvVarStack {
             .chain(two.temp.iter().flat_map(|(k, v)| [k, "=", v, "\0"]))
             .collect()
     }
+
+    pub fn joined(one: &EnvVarStack, two: &EnvVarStack) -> Self {
+        let mut map = two.temp.clone();
+        map.extend(one.temp.clone());
+
+        Self { temp: map }
+    }
 }
 
 struct EnvBuilder {
