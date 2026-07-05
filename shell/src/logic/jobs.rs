@@ -267,81 +267,17 @@ impl<'a> Command_<'a> {
         // check whether bin is on PATH if its not absolute
 
         if !is_canonical(&bin_bytes) {
-            let current_builder = FDActionBuilder::new()
-                .add_clear()
-                .add_inherit(0, 0)
-                .add_inherit(2, 2);
-
-            let mut pipe_fds = [0_u32, 0_u32];
-            unsafe { syscalls::pipe(&mut pipe_fds as *mut [u32; 2], -1) }.ok()?;
-            let current_builder = current_builder.add_inherit(pipe_fds[1], STDOUT_FILENO);
-
-            let _rd_guard = OpenFd(pipe_fds[0]);
-            let _w_guard = OpenFd(pipe_fds[1]);
-
-            let mut buf_reader = [0; 32];
-            let mut data = Vec::new();
-
-            serial_println!(
-                "{:?}\n{}",
-                current_builder,
-                env.get("PATH").unwrap_or_default()
-            );
-
             'path: for path in env.get("PATH").unwrap_or_default().split(':') {
-                // just spawn ls cuz im lazy
-                if let Ok(pid) = unsafe {
-                    syscalls::spawn_process(
-                        "/ram/bin/ls".as_ptr(),
-                        "/ram/bin/ls".len(),
-                        path.len(),
-                        path.as_ptr(),
-                        env_str.len(),
-                        env_str.as_ptr(),
-                        current_builder.ptr().as_ptr(),
-                        current_builder.actions.len(),
-                    )
+                let mut candidate = path.as_bytes().to_vec();
+                candidate.push(b'/');
+                candidate.extend_from_slice(&bin_bytes);
+
+                if let Ok(fd) = unsafe {
+                    syscalls::open(candidate.as_ptr(), candidate.len(), OpenOptions::READ)
                 } {
-                    serial_println!("spawned {pid:?}");
-                    loop {
-                        let state = unsafe {
-                            syscalls::wait_pid(
-                                pid,
-                                -1,
-                                WaitOptions::empty(),
-                                TaskWaitOptions::W_EXIT,
-                            )
-                        };
-                        serial_println!("got: {state:?}");
-                        if let Ok(s) = state
-                            && matches!(s, TaskStateChange::EXIT)
-                        {
-                            break;
-                        } else if state.is_err() {
-                            continue 'path;
-                        }
-                    }
-
-                    while let Ok(n) = unsafe {
-                        syscalls::read(pipe_fds[0], buf_reader.as_mut_ptr(), buf_reader.len(), 0)
-                    } && n > 0
-                    {
-                        data.extend_from_slice(&buf_reader[..n as usize]);
-                    }
-
-                    serial_println!("got: {}", String::from_utf8(data.clone()).unwrap());
-
-                    for component in data.split(|c| *c == b'\t') {
-                        if let Some(suffix) = component.strip_prefix(bin_bytes.as_slice())
-                            && (suffix.is_empty() || suffix.starts_with(b"/"))
-                        {
-                            // we found a matching item on PATH
-                            bin_bytes = path.as_bytes().to_vec();
-                            bin_bytes.push(b'/');
-                            bin_bytes.extend_from_slice(component);
-                            break 'path;
-                        }
-                    }
+                    _ = unsafe { syscalls::close(fd) };
+                    bin_bytes = candidate;
+                    break 'path;
                 }
             }
         }
