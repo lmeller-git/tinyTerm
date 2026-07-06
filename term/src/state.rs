@@ -4,6 +4,7 @@ use alloc::{string::String, vec, vec::Vec};
 use libtinyos::{serial_println, syscalls};
 use ratatui::{
     Terminal,
+    layout::Position,
     prelude::Backend,
     style::{Style, Stylize},
     text::Line,
@@ -177,6 +178,10 @@ impl<B: Backend> TermState<B> {
 
         self.terminal
             .draw(|frame| {
+                frame.set_cursor_position(Position::new(
+                    self._cursor.col as u16,
+                    self._cursor.row as u16,
+                ));
                 let block = Block::bordered()
                     .border_style(Style::new().fg(self.config.border()).bg(self.config.bg()))
                     .bg(self.config.bg())
