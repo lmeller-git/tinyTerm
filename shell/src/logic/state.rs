@@ -141,9 +141,11 @@ impl Handler for ShellState {
 
     fn backspace(&mut self) {
         if !self.is_empty() && self.cursor > PROMPT.chars().count() {
-            self.input_buf.remove(self.cursor - 1);
             self.move_backward(1);
+            self.input_buf.remove(self.cursor);
             print!("\r{}", self.input_buf.iter().collect::<String>());
+            let bytes = vec![ARROW_LEFT; self.input_buf.len().saturating_sub(self.cursor)];
+            stdout_bytes(bytes.as_flattened());
         }
     }
 }
