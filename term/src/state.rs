@@ -1,13 +1,16 @@
 use core::{ops::RangeBounds, time::Duration};
 
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use libtinyos::{serial_println, syscalls};
 use ratatui::{
     Terminal,
     layout::Position,
     prelude::Backend,
-    style::{Style, Stylize},
-    text::Line,
+    style::{Color, Style, Stylize},
+    text::{Line, Span},
     widgets::{Block, BorderType, Padding, Paragraph, Wrap},
 };
 use vte::ansi::{Handler, Processor, Timeout};
@@ -137,7 +140,7 @@ impl<B: Backend> TermState<B> {
             terminal: Terminal::new(backend).unwrap(),
             config: Config::new(),
             _cursor: Cursor::default(),
-            rows: vec![BufferLine::new()],
+            rows: alloc::vec![BufferLine::new()],
             visible: Visible { from: 0, count: 1 },
             dirty: Dirtyness::Full,
         }
@@ -168,22 +171,45 @@ impl<B: Backend> TermState<B> {
     }
 
     fn draw(&mut self) {
+        let conf_bg = self.config.bg();
         let lines = self
             .rows
             .iter()
+            .enumerate()
             .skip(self.visible.from)
             .take(self.visible.count)
-            .map(|line| Line::raw(line.to_string()))
+            .map(|(row_idx, line)| {
+                if row_idx != self._cursor.row {
+                    return Line::raw(line.to_string());
+                }
+                let chars: Vec<char> = line.to_string().chars().collect();
+                let col = self._cursor.col.min(chars.len());
+                let before: String = chars[..col].iter().collect();
+                let cursor_char = chars.get(col).copied().unwrap_or(' ').to_string();
+                let after = if col < chars.len() {
+                    chars[col + 1..].iter().collect()
+                } else {
+                    String::new()
+                };
+                Line::from(alloc::vec![
+                    Span::raw(before),
+                    Span::styled(
+                        cursor_char,
+                        Style::new().bg(if conf_bg == Color::White {
+                            Color::DarkGray
+                        } else {
+                            Color::White
+                        })
+                    ),
+                    Span::raw(after),
+                ])
+            })
             .collect::<Vec<Line>>();
 
         self.terminal
             .draw(|frame| {
-                frame.set_cursor_position(Position::new(
-                    self._cursor.col as u16,
-                    self._cursor.row as u16,
-                ));
                 let block = Block::bordered()
-                    .border_style(Style::new().fg(self.config.border()).bg(self.config.bg()))
+                    .border_style(Style::new().fg(self.config.border()).bg(conf_bg))
                     .bg(self.config.bg())
                     .title_top(
                         Line::from("Terminal")
@@ -197,7 +223,7 @@ impl<B: Backend> TermState<B> {
                     .block(block)
                     .wrap(Wrap { trim: false })
                     .fg(self.config.text())
-                    .bg(self.config.bg());
+                    .bg(conf_bg);
                 frame.render_widget(paragraph, frame.area())
             })
             .unwrap();
@@ -353,7 +379,7 @@ impl EventPacket {
 
 impl<E: Into<Event>> From<E> for EventPacket {
     fn from(value: E) -> Self {
-        Self::new(vec![value.into()])
+        Self::new(alloc::vec![value.into()])
     }
 }
 
